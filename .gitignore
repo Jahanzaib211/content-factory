@@ -1,42 +1,16 @@
-# Video files
-*.mp4
-*.webm
-*.mov
-*.mkv
-
-# YOLO model
-*.pt
-
-# Python virtual environment
-.venv/
+dashboard/test-results/
+dashboard/playwright-report/
+dashboard/.cache/
+dashboard/node_modules/
 __pycache__/
 *.pyc
-
-# Temporary files / runtime dirs
-temp_*
-uploads/
-downloads/
-videos/
+.pytest_cache/
+test-results/
+playwright-report/
 output/
-
-# OS / IDE
-.DS_Store
-.idea/
-.vscode/
-
-# Secrets
 .env
-
-# Generated metadata
-*_metadata.json
-
-# Cache dirs
-.cache/
-.config/
-# Multi-agent Skills
-.agents/
-.agent/
-.claude/
-skills/
-skills-lock.json
-
+yolov8n.pt
+*.mp4
+*.avi
+*.mov
+*.webm

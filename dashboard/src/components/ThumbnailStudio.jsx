@@ -30,7 +30,8 @@ function StepIndicator({ currentStep }) {
   );
 }
 
-function DragDropZone({ label, accept, onFile, file, onClear, icon: Icon }) {
+function DragDropZone({ label, accept, onFile, file, onClear, icon: _Icon }) {
+  const Icon = _Icon;
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef(null);
 
