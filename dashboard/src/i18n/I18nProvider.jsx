@@ -1,12 +1,10 @@
-"""
-Lightweight React i18n hook for Content Factory.
-
-Use:  const t = useT();  <h1>{t('nav.factory')}</h1>
-
-Lang is stored in localStorage('cf_lang') and reactive. A top-level
-<LangPicker /> in the Multilingual settings card writes to the same
-key, so all components re-render on language change.
-"""
+// Lightweight React i18n hook for Content Factory.
+//
+// Use:  const t = useT();  <h1>{t('nav.factory')}</h1>
+//
+// Lang is stored in localStorage('cf_lang') and reactive. A top-level
+// <LangPicker /> in the Multilingual settings card writes to the same
+// key, so all components re-render on language change.
 import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
 import { MESSAGES, SUPPORTED, DEFAULT_LANG } from './messages';
 
