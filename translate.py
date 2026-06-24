@@ -18,19 +18,28 @@ import httpx
 import subprocess
 from typing import Optional
 
+# Local no-op decorator used when app.trace_llm_call is not yet imported
+# (avoids circular import: translate.py is imported by app.py at module load).
+def _noop_trace_decorator(*args, **kwargs):
+    def _wrap(fn):
+        return fn
+    return _wrap
+
 try:
     from engines import FeatureFlags
     from engines.minimax_speech import MiniMaxSpeechEngine
     from minimax_client import get_client as get_ai_client
-    from app import trace_llm_call
 except Exception:  # pragma: no cover - engines package is always present in CF
     FeatureFlags = None
     MiniMaxSpeechEngine = None
     get_ai_client = None
-    try:
-        trace_llm_call = lambda *a, **k: (lambda f: f)
-    except Exception:
-        trace_llm_call = lambda *a, **k: (lambda f: f)
+
+# Best-effort: import trace_llm_call from app (if app is already loaded).
+# If the circular import hasn't resolved yet, fall back to no-op.
+try:
+    from app import trace_llm_call  # type: ignore
+except ImportError:
+    trace_llm_call = _noop_trace_decorator  # type: ignore
 
 ELEVENLABS_API_BASE = "https://api.elevenlabs.io/v1"
 
