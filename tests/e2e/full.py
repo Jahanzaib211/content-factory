@@ -38,6 +38,8 @@ NEW_TABS = [
     ("multilingual", "Multilingual"),
     ("research", "Research"),
     ("analytics", "Analytics"),
+    ("gallery", "Gallery"),
+    ("video-editor", "Video Editor"),
     ("settings", "Settings"),
 ]
 

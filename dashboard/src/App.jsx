@@ -1021,6 +1021,353 @@ function ContentFactoryPanel() {
   );
 }
 
+// Gallery panel — unified content store
+function GalleryPanel() {
+  const [items, setItems] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState({ source: '', template_id: '', status: '', tag: '', search: '' });
+  const [editingItem, setEditingItem] = useState(null);
+  const [caption, setCaption] = useState('');
+
+  const fetchGallery = async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (filter.source) params.set('source', filter.source);
+      if (filter.template_id) params.set('template_id', filter.template_id);
+      if (filter.status) params.set('status', filter.status);
+      if (filter.tag) params.set('tag', filter.tag);
+      if (filter.search) params.set('search', filter.search);
+      const url = getApiUrl(`/api/gallery?${params.toString()}`);
+      const [itemsRes, statsRes] = await Promise.all([
+        fetch(url).then(r => r.json()),
+        fetch(getApiUrl('/api/gallery/stats')).then(r => r.json()),
+      ]);
+      setItems(itemsRes.items || []);
+      setStats(statsRes);
+    } catch (_) {
+      toast.error('Failed to load gallery');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchGallery(); }, [filter]);
+
+  const publish = async (item) => {
+    try {
+      const r = await fetch(getApiUrl(`/api/gallery/${item.id}/publish`), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caption: item.caption, tags: item.tags }),
+      });
+      if (r.ok) { toast.success('Published!'); fetchGallery(); }
+      else toast.error('Publish failed');
+    } catch { toast.error('Publish failed'); }
+  };
+
+  const deleteItem = async (item) => {
+    if (!confirm('Delete this item?')) return;
+    try {
+      const r = await fetch(getApiUrl(`/api/gallery/${item.id}`), { method: 'DELETE' });
+      if (r.ok) { toast.success('Deleted'); fetchGallery(); }
+    } catch { toast.error('Delete failed'); }
+  };
+
+  const saveCaption = async () => {
+    if (!editingItem) return;
+    try {
+      const r = await fetch(getApiUrl(`/api/gallery/${editingItem.id}`), {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caption }),
+      });
+      if (r.ok) { toast.success('Saved'); setEditingItem(null); fetchGallery(); }
+    } catch { toast.error('Save failed'); }
+  };
+
+  const typeColors = { video: 'text-violet-400', image: 'text-emerald-400', audio: 'text-amber-400', text: 'text-zinc-400' };
+  const statusColors = { draft: 'bg-zinc-500/20 text-zinc-400', published: 'bg-emerald-500/20 text-emerald-400', failed: 'bg-red-500/20 text-red-400' };
+
+  return (
+    <div className="h-full flex flex-col overflow-hidden p-4 md:p-6 animate-[fadeIn_0.3s_ease-out]">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-xl font-bold text-white">Gallery</h2>
+          <p className="text-zinc-400 text-sm">All generated content in one place</p>
+        </div>
+        <button onClick={fetchGallery} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400">
+          <RefreshCw size={18} />
+        </button>
+      </div>
+
+      {/* Stats bar */}
+      {stats && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+          {[
+            ['Total', stats.total_items],
+            ['Videos', stats.by_type?.video || 0],
+            ['Images', stats.by_type?.image || 0],
+            ['Audio', stats.by_type?.audio || 0],
+            ['Published', stats.by_status?.published || 0],
+          ].map(([label, val]) => (
+            <div key={label} className="bg-white/5 rounded-xl p-3 text-center">
+              <div className="text-lg font-bold text-white">{val}</div>
+              <div className="text-xs text-zinc-400">{label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        <input
+          type="text" placeholder="Search..."
+          value={filter.search} onChange={e => setFilter(f => ({ ...f, search: e.target.value }))}
+          className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white w-48"
+        />
+        <select value={filter.source} onChange={e => setFilter(f => ({ ...f, source: e.target.value }))}
+          className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white">
+          <option value="">All sources</option>
+          <option value="clip">Clip</option><option value="factory">Factory</option>
+          <option value="saasshorts">SaaShorts</option><option value="avatar">Avatar</option>
+          <option value="multilingual">Multilingual</option><option value="upload">Upload</option>
+        </select>
+        <select value={filter.status} onChange={e => setFilter(f => ({ ...f, status: e.target.value }))}
+          className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white">
+          <option value="">All statuses</option>
+          <option value="draft">Draft</option><option value="published">Published</option>
+        </select>
+      </div>
+
+      {/* Grid */}
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center text-zinc-400">
+          <Loader2 className="animate-spin mr-2" size={20} /> Loading gallery...
+        </div>
+      ) : items.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center text-zinc-400">
+          <Image size={48} className="mb-4 text-zinc-600" />
+          <p className="text-lg">No items yet</p>
+          <p className="text-sm">Content will appear here after generation</p>
+        </div>
+      ) : (
+        <div className="flex-1 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {items.map(item => (
+            <div key={item.id} className="bg-white/5 rounded-xl p-4 border border-white/5 hover:border-white/10 transition flex flex-col">
+              {/* Thumbnail */}
+              {item.file_type === 'video' ? (
+                <div className="w-full aspect-[9/16] bg-zinc-800 rounded-lg mb-3 flex items-center justify-center relative overflow-hidden">
+                  <FileVideo size={32} className="text-violet-400/50" />
+                  <div className="absolute bottom-1 right-1 bg-black/70 text-xs px-1.5 py-0.5 rounded text-zinc-300">
+                    {item.file_type}
+                  </div>
+                </div>
+              ) : item.file_type === 'image' ? (
+                <div className="w-full aspect-video bg-zinc-800 rounded-lg mb-3 flex items-center justify-center">
+                  <Image size={32} className="text-emerald-400/50" />
+                </div>
+              ) : item.file_type === 'audio' ? (
+                <div className="w-full h-16 bg-zinc-800 rounded-lg mb-3 flex items-center justify-center">
+                  <Volume2 size={24} className="text-amber-400/50" />
+                </div>
+              ) : (
+                <div className="w-full h-16 bg-zinc-800 rounded-lg mb-3 flex items-center justify-center">
+                  <FileText size={24} className="text-zinc-400/50" />
+                </div>
+              )}
+
+              {/* Info */}
+              <div className="flex-1">
+                <div className="font-semibold text-white text-sm truncate">{item.title || 'Untitled'}</div>
+                <div className="text-xs text-zinc-400 mt-1 line-clamp-2">{item.caption || 'No caption'}</div>
+              </div>
+
+              {/* Meta */}
+              <div className="flex items-center gap-2 mt-2 flex-wrap">
+                <span className={`text-xs font-mono ${typeColors[item.file_type] || 'text-zinc-400'}`}>{item.file_type}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[item.status] || 'bg-zinc-500/20 text-zinc-400'}`}>{item.status}</span>
+                {item.file_size > 0 && (
+                  <span className="text-xs text-zinc-500">{(item.file_size / 1048576).toFixed(1)}MB</span>
+                )}
+              </div>
+
+              {/* Tags */}
+              {item.tags?.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {item.tags.slice(0, 3).map(t => (
+                    <span key={t} className="text-xs bg-white/5 text-zinc-400 px-1.5 py-0.5 rounded">#{t}</span>
+                  ))}
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-1.5 mt-3">
+                <button onClick={() => { setEditingItem(item); setCaption(item.caption); }}
+                  className="flex-1 text-xs bg-white/5 hover:bg-white/10 text-zinc-300 rounded-lg py-1.5 transition">
+                  Edit
+                </button>
+                <button onClick={() => publish(item)}
+                  className="flex-1 text-xs bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-lg py-1.5 transition">
+                  Publish
+                </button>
+                <button onClick={() => deleteItem(item)}
+                  className="text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg px-2 py-1.5 transition">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Edit modal */}
+      {editingItem && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setEditingItem(null)}>
+          <div className="bg-zinc-900 rounded-2xl p-6 w-full max-w-md border border-white/10" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-white mb-4">Edit Caption</h3>
+            <textarea value={caption} onChange={e => setCaption(e.target.value)}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm h-24 resize-none mb-4" />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setEditingItem(null)} className="px-4 py-2 text-zinc-400 hover:text-white text-sm">Cancel</button>
+              <button onClick={saveCaption} className="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary/80">Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Video Editor panel — wraps mcp-video editing tools
+function VideoEditorPanel() {
+  const [tools, setTools] = useState([]);
+  const [selectedTool, setSelectedTool] = useState('');
+  const [inputPath, setInputPath] = useState('');
+  const [params, setParams] = useState('');
+  const [processing, setProcessing] = useState(false);
+  const [result, setResult] = useState(null);
+  const [videoInfo, setVideoInfo] = useState(null);
+
+  useEffect(() => {
+    fetch(getApiUrl('/api/video-editor/tools'))
+      .then(r => r.json()).then(d => setTools(d.tools || []))
+      .catch(() => {});
+  }, []);
+
+  const getVideoInfo = async () => {
+    if (!inputPath) return;
+    try {
+      const r = await fetch(getApiUrl('/api/video-editor/info'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: inputPath }),
+      });
+      const d = await r.json();
+      setVideoInfo(d);
+    } catch { toast.error('Failed to get video info'); }
+  };
+
+  const executeTool = async () => {
+    if (!selectedTool || !inputPath) return;
+    setProcessing(true); setResult(null);
+    try {
+      let parsedParams = {};
+      try { parsedParams = params ? JSON.parse(params) : {}; } catch { toast.error('Invalid JSON params'); setProcessing(false); return; }
+      const r = await fetch(getApiUrl(`/api/video-editor/${selectedTool}`), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: inputPath, ...parsedParams }),
+      });
+      const d = await r.json();
+      setResult(d);
+      if (d.output_path) toast.success('Done!');
+      else if (d.error) toast.error(d.error);
+    } catch { toast.error('Processing failed'); }
+    finally { setProcessing(false); }
+  };
+
+  const toolDescriptions = {
+    trim: 'Cut video between timestamps', merge: 'Merge multiple videos', add_text: 'Add text overlay',
+    add_audio: 'Add background audio', resize: 'Resize dimensions', crop: 'Crop region',
+    rotate: 'Rotate video', speed: 'Change speed', fade: 'Add fade in/out',
+    filter: 'Apply visual filter', chroma_key: 'Green screen removal', overlay_video: 'Overlay another video',
+    subtitles: 'Burn subtitles', watermark: 'Add watermark', normalize_audio: 'Normalize audio levels',
+    extract_audio: 'Extract audio track', thumbnail: 'Generate thumbnail', detect_scenes: 'Detect scene changes',
+    convert: 'Convert format', stabilize: 'Stabilize shaky footage', info: 'Get video metadata',
+    quality_check: 'Check quality metrics', pipeline: 'Chain multiple operations',
+  };
+
+  return (
+    <div className="h-full flex flex-col overflow-hidden p-4 md:p-6 animate-[fadeIn_0.3s_ease-out]">
+      <div className="mb-4">
+        <h2 className="text-xl font-bold text-white">Video Editor</h2>
+        <p className="text-zinc-400 text-sm">Professional video editing powered by FFmpeg</p>
+      </div>
+
+      {/* Input */}
+      <div className="bg-white/5 rounded-xl p-4 mb-4 border border-white/5">
+        <label className="text-xs text-zinc-400 mb-1 block">Input Video Path</label>
+        <div className="flex gap-2">
+          <input value={inputPath} onChange={e => setInputPath(e.target.value)}
+            placeholder="/app/output/.../video.mp4"
+            className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm" />
+          <button onClick={getVideoInfo} className="px-3 py-2 bg-white/10 hover:bg-white/15 text-zinc-300 rounded-lg text-sm">
+            Info
+          </button>
+        </div>
+        {videoInfo && (
+          <div className="mt-2 text-xs text-zinc-400 bg-white/5 rounded-lg p-2 font-mono">
+            {videoInfo.width}x{videoInfo.height} | {videoInfo.codec} | {videoInfo.duration?.toFixed(1)}s | {videoInfo.size_mb}MB
+          </div>
+        )}
+      </div>
+
+      {/* Tool selector */}
+      <div className="bg-white/5 rounded-xl p-4 mb-4 border border-white/5">
+        <label className="text-xs text-zinc-400 mb-1 block">Edit Operation</label>
+        <select value={selectedTool} onChange={e => { setSelectedTool(e.target.value); setParams(''); setResult(null); }}
+          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm">
+          <option value="">Select an operation...</option>
+          {tools.map(t => <option key={t.name} value={t.name}>{t.name} — {toolDescriptions[t.name] || t.description}</option>)}
+        </select>
+        {selectedTool && toolDescriptions[selectedTool] && (
+          <p className="text-xs text-zinc-500 mt-2">{toolDescriptions[selectedTool]}</p>
+        )}
+      </div>
+
+      {/* Params */}
+      {selectedTool && selectedTool !== 'info' && (
+        <div className="bg-white/5 rounded-xl p-4 mb-4 border border-white/5">
+          <label className="text-xs text-zinc-400 mb-1 block">Parameters (JSON)</label>
+          <textarea value={params} onChange={e => setParams(e.target.value)}
+            placeholder='{"start": 10, "end": 20}'
+            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm font-mono h-20 resize-none" />
+        </div>
+      )}
+
+      {/* Execute */}
+      <button onClick={executeTool} disabled={!selectedTool || !inputPath || processing}
+        className="w-full py-3 rounded-xl font-semibold text-sm transition disabled:opacity-40 bg-primary hover:bg-primary/80 text-white">
+        {processing ? <Loader2 className="animate-spin inline mr-2" size={16} /> : <Wand2 className="inline mr-2" size={16} />}
+        {processing ? 'Processing...' : 'Run Operation'}
+      </button>
+
+      {/* Result */}
+      {result && (
+        <div className="mt-4 bg-white/5 rounded-xl p-4 border border-white/5">
+          <h4 className="text-sm font-semibold text-white mb-2">Result</h4>
+          {result.output_path ? (
+            <div className="text-xs text-emerald-400 font-mono break-all">Output: {result.output_path}</div>
+          ) : result.error ? (
+            <div className="text-xs text-red-400">{result.error}</div>
+          ) : (
+            <pre className="text-xs text-zinc-400 font-mono overflow-x-auto max-h-48 overflow-y-auto">{JSON.stringify(result, null, 2)}</pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // One row per platform. Polls connection status and exposes Connect/Disconnect.
 function SocialConnectRow({ platform, label, env, devUrl }) {
   const [status, setStatus] = useState(null);
@@ -1307,7 +1654,7 @@ function App() {
             // Update logs if available
             if (data.logs) setLogs(data.logs);
           }
-        } catch (e) {
+    } catch (_) {
           console.error("Polling error", e);
         }
       }, 2000);
@@ -1499,13 +1846,21 @@ function App() {
           <span className="font-medium hidden lg:block">Analytics</span>
         </button>
 
-        {/* <button
+        <button
           onClick={() => setActiveTab('gallery')}
           className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-colors ${activeTab === 'gallery' ? 'bg-primary/10 text-primary' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}
         >
           <LayoutGrid size={20} />
           <span className="font-medium hidden lg:block">Gallery</span>
-        </button> */}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('video-editor')}
+          className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-colors ${activeTab === 'video-editor' ? 'bg-violet-500/10 text-violet-400' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}
+        >
+          <Wand2 size={20} />
+          <span className="font-medium hidden lg:block">Video Editor</span>
+        </button>
 
         <button
           onClick={() => setActiveTab('settings')}
@@ -2111,9 +2466,10 @@ function App() {
           )}
 
           {/* View: Gallery */}
-          {/* {activeTab === 'gallery' && (
-            <Gallery />
-          )} */}
+          {activeTab === 'gallery' && <GalleryPanel />}
+
+          {/* View: Video Editor */}
+          {activeTab === 'video-editor' && <VideoEditorPanel />}
 
           {/* View: Dashboard (Idle) */}
           {activeTab === 'dashboard' && status === 'idle' && (
