@@ -5,27 +5,38 @@ import subprocess
 import time
 from google import genai
 from google.genai import types
+from minimax_client import get_client as get_ai_client, MINIMAX, GEMINI
 
 class VideoEditor:
-    def __init__(self, api_key):
-        self.client = genai.Client(api_key=api_key)
-        self.model_name = "gemini-3-flash-preview" 
+    def __init__(self, api_key, provider: str = GEMINI):
+        self.provider = provider
+        self.client = get_ai_client(provider, api_key)
+        # Model selection per provider
+        if provider == MINIMAX:
+            self.model_name = os.getenv("MINIMAX_MODEL", "MiniMax-M3")
+        else:
+            self.model_name = "gemini-3-flash-preview"
 
     def upload_video(self, video_path):
-        """Uploads video to Gemini File API."""
-        print(f"📤 Uploading {video_path} to Gemini...")
-        
+        """Uploads video to AI provider (Gemini File API; MiniMax inlines as data URI)."""
+        print(f"📤 Uploading {video_path} to {self.provider}...")
+
         # Ensure we are passing a path that exists
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
-            
-        # Using 'file' keyword instead of 'path'
+
+        if self.provider == MINIMAX:
+            # MiniMax uses OpenAI-compatible chat; our client inlines the file bytes.
+            print("✅ MiniMax will inline the file at request time.")
+            return self.client.files.upload(file=video_path)
+
+        # Gemini File API
         try:
             file_upload = self.client.files.upload(file=video_path)
         except Exception as e:
             print(f"❌ Gemini Upload Error: {e}")
             raise e
-        
+
         # Wait for processing
         print("⏳ Waiting for video processing by Gemini...")
         while True:

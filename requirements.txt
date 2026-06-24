@@ -1,5 +1,10 @@
 scenedetect==0.7
 ultralytics==8.4.46
+# CPU-only torch/torchvision: container has no GPU, so the CUDA wheels would waste
+# ~700MB+ of disk and time downloading nvidia_cudnn_cu13 etc.
+# Use `--extra-index-url` (not `--index-url`) so PyPI is also searched for all the
+# non-torch packages below (fastapi, mediapipe, etc.).
+--extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.11.0
 torchvision==0.26.0
 tqdm==4.67.3

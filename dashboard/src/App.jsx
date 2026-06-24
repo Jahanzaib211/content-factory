@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, FileVideo, Sparkles, Youtube, Instagram, Share2, LogOut, ChevronDown, Check, Activity, LayoutDashboard, Settings, PlusCircle, History, Menu, X, Terminal, Shield, LayoutGrid, Image, Globe, RotateCcw, Calendar, AlertTriangle, KeyRound, Bot, Users, Smartphone, ExternalLink, Copy, CheckCircle2 } from 'lucide-react';
-import KeyInput from './components/KeyInput';
+import KeyInput, { MiniMaxKeyInput } from './components/KeyInput';
 import MediaInput from './components/MediaInput';
 import ResultCard from './components/ResultCard';
 import ProcessingAnimation from './components/ProcessingAnimation';
@@ -135,6 +135,11 @@ const pollJob = async (jobId) => {
 
 function App() {
   const [apiKey, setApiKey] = useState(localStorage.getItem('gemini_key') || '');
+  const [minimaxKey, setMinimaxKey] = useState(() => {
+    const stored = localStorage.getItem('minimax_key_v1');
+    if (stored) return decrypt(stored);
+    return '';
+  });
   // Social API State - Load encrypted or plain
   const [uploadPostKey, setUploadPostKey] = useState(() => {
     const stored = localStorage.getItem('uploadPostKey_v3');
@@ -237,6 +242,14 @@ function App() {
   }, [apiKey]);
 
   useEffect(() => {
+    if (minimaxKey) {
+      localStorage.setItem('minimax_key_v1', encrypt(minimaxKey));
+    } else {
+      localStorage.removeItem('minimax_key_v1');
+    }
+  }, [minimaxKey]);
+
+  useEffect(() => {
     if (uploadPostKey) {
       localStorage.setItem('uploadPostKey_v3', encrypt(uploadPostKey));
     }
@@ -321,7 +334,8 @@ function App() {
   };
 
   const handleProcess = async (data) => {
-    if (!apiKey || !uploadPostKey) {
+    const hasAnyKey = apiKey || minimaxKey;
+    if (!hasAnyKey) {
       setShowKeyModal(true);
       return;
     }
@@ -332,9 +346,15 @@ function App() {
 
     try {
       let body;
-      const headers = { 'X-Gemini-Key': apiKey };
+      const buildHeaders = () => {
+        const h = {};
+        if (apiKey) h['X-Gemini-Key'] = apiKey;
+        if (minimaxKey) h['X-MiniMax-Key'] = minimaxKey;
+        return h;
+      };
 
       if (data.type === 'url') {
+        const headers = buildHeaders();
         headers['Content-Type'] = 'application/json';
         body = JSON.stringify({ url: data.payload, acknowledged: !!data.acknowledged });
       } else {
@@ -346,7 +366,7 @@ function App() {
 
       const res = await fetch(getApiUrl('/api/process'), {
         method: 'POST',
-        headers: data.type === 'url' ? headers : { 'X-Gemini-Key': apiKey },
+        headers: data.type === 'url' ? buildHeaders() : buildHeaders(),
         body
       });
 
@@ -377,7 +397,7 @@ function App() {
         <div className="w-8 h-8 bg-white/5 rounded-lg flex items-center justify-center shrink-0 overflow-hidden border border-white/5">
           <img src="/logo-openshorts.png" alt="Logo" className="w-full h-full object-cover" />
         </div>
-        <span className="font-bold text-lg text-white hidden lg:block tracking-tight">OpenShorts</span>
+        <span className="font-bold text-lg text-white hidden lg:block tracking-tight">Content Factory</span>
       </div>
 
       <nav className="flex-1 px-4 py-4 space-y-2">
@@ -453,7 +473,7 @@ function App() {
           </div>
         </a>
         <a
-          href="https://github.com/mutonby/openshorts"
+          href="https://github.com/jahanzaib/content-factory"
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-2 p-3 bg-white/5 hover:bg-white/10 rounded-xl transition-colors group"
@@ -503,36 +523,28 @@ function App() {
               />
             )}
 
-            {(!apiKey || !uploadPostKey) && (
+            {(!apiKey && !minimaxKey) && (
               <button
                 onClick={() => setActiveTab('settings')}
                 className="text-xs text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 px-3 py-1 rounded-full border border-amber-500/30 transition-colors flex items-center gap-1.5"
-                title="Click to configure your API keys"
+                title="Set your AI provider key (Gemini or MiniMax)"
               >
                 <AlertTriangle size={12} />
-                {!apiKey && !uploadPostKey
-                  ? 'Gemini & Upload-Post keys missing'
-                  : !apiKey
-                    ? 'Gemini API Key Missing'
-                    : 'Upload-Post API Key Missing'}
+                AI Provider Key Missing
               </button>
             )}
           </div>
         </header>
 
-        {/* Persistent Missing Keys Banner — visible on every screen */}
-        {(!apiKey || !uploadPostKey) && activeTab !== 'settings' && (
+        {/* Persistent Missing Keys Banner — AI provider only. Upload-Post is opt-in for publishing. */}
+        {(!apiKey && !minimaxKey) && activeTab !== 'settings' && (
           <div className="mx-6 mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-4 shrink-0 animate-[fadeIn_0.3s_ease-out]">
             <div className="flex items-center gap-3 text-sm text-amber-200">
               <KeyRound size={16} className="shrink-0 text-amber-400" />
               <div>
-                <span className="font-semibold">Required API keys missing.</span>{' '}
+                <span className="font-semibold">AI provider key required.</span>{' '}
                 <span className="text-amber-200/80">
-                  {!apiKey && !uploadPostKey
-                    ? 'Set your Gemini and Upload-Post API keys to use OpenShorts.'
-                    : !apiKey
-                      ? 'Set your Gemini API key to use OpenShorts.'
-                      : 'Set your Upload-Post API key to use OpenShorts.'}
+                  Set your <strong className="text-amber-100">Gemini</strong> or <strong className="text-amber-100">MiniMax</strong> API key to generate clips, titles, and edits.
                 </span>
               </div>
             </div>
@@ -541,6 +553,27 @@ function App() {
               className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black transition-colors"
             >
               Go to Settings
+            </button>
+          </div>
+        )}
+
+        {/* Optional Upload-Post reminder — only when user has results and is missing the publish key */}
+        {!uploadPostKey && results && (status === 'complete' || results?.clips?.length > 0) && activeTab !== 'settings' && (
+          <div className="mx-6 mt-3 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-between gap-4 shrink-0 animate-[fadeIn_0.3s_ease-out]">
+            <div className="flex items-center gap-3 text-sm text-emerald-200">
+              <Share2 size={16} className="shrink-0 text-emerald-400" />
+              <div>
+                <span className="font-semibold">Want to publish to TikTok / Reels / YouTube?</span>{' '}
+                <span className="text-emerald-200/80">
+                  Add your <strong className="text-emerald-100">Upload-Post</strong> key to enable one-click posting (optional).
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => setActiveTab('settings')}
+              className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black transition-colors"
+            >
+              Configure
             </button>
           </div>
         )}
@@ -571,7 +604,20 @@ function App() {
                   <Shield size={12} /> Privacy: keys only live in your browser (sent to backend just to process)
                 </div>
               </div>
-              <KeyInput onKeySet={setApiKey} savedKey={apiKey} />
+              <KeyInput
+                onKeySet={setApiKey}
+                savedKey={apiKey}
+                title="Gemini API Key"
+                iconClass="bg-accent/20 text-accent"
+                placeholder="AIzaSy..."
+                getKeyHref="https://aistudio.google.com/app/apikey"
+                getKeyLabel="Get your free Gemini API Key here"
+                storageKey="gemini_key"
+              />
+              <MiniMaxKeyInput
+                onKeySet={setMinimaxKey}
+                savedKey={minimaxKey}
+              />
 
               <div className={`glass-panel p-6 mt-8 ${!uploadPostKey ? 'border-amber-500/30 ring-1 ring-amber-500/20' : ''}`}>
                 <div className="flex items-center justify-between mb-4">
@@ -726,7 +772,7 @@ function App() {
 
           {/* View: SaaS Shorts */}
           {activeTab === 'saasshorts' && (
-            <SaaShortsTab geminiApiKey={apiKey} elevenLabsKey={elevenLabsKey} falKey={falKey} uploadPostKey={uploadPostKey} uploadUserId={uploadUserId} />
+            <SaaShortsTab geminiApiKey={apiKey} minimaxApiKey={minimaxKey} elevenLabsKey={elevenLabsKey} falKey={falKey} uploadPostKey={uploadPostKey} uploadUserId={uploadUserId} />
           )}
 
           {/* View: AI Agent */}
@@ -852,7 +898,7 @@ function App() {
 
           {/* View: Thumbnails */}
           {activeTab === 'thumbnails' && (
-            <ThumbnailStudio geminiApiKey={apiKey} uploadPostKey={uploadPostKey} uploadUserId={uploadUserId} />
+            <ThumbnailStudio geminiApiKey={apiKey} minimaxApiKey={minimaxKey} uploadPostKey={uploadPostKey} uploadUserId={uploadUserId} />
           )}
 
           {/* View: Gallery */}
@@ -978,6 +1024,7 @@ function App() {
                           uploadPostKey={uploadPostKey}
                           uploadUserId={uploadUserId}
                           geminiApiKey={apiKey}
+                          minimaxApiKey={minimaxKey}
                           elevenLabsKey={elevenLabsKey}
                           onPlay={(time) => handleClipPlay(time)}
                           onPause={handleClipPause}
@@ -1011,14 +1058,14 @@ function App() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowKeyModal(false)}>
           <div className="bg-[#18181b] border border-white/10 rounded-2xl p-6 max-w-md w-full mx-4 space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-bold text-white">
-              {!apiKey && !uploadPostKey
+              {(!apiKey && !minimaxKey) && !uploadPostKey
                 ? 'Required API Keys Missing'
-                : !apiKey
-                  ? 'Gemini API Key Required'
+                : (!apiKey && !minimaxKey)
+                  ? 'AI Provider Key Required'
                   : 'Upload-Post API Key Required'}
             </h2>
             <p className="text-sm text-zinc-400">
-              OpenShorts needs both a <strong className="text-zinc-200">Gemini</strong> API key and an <strong className="text-zinc-200">Upload-Post</strong> API key. Both have free tiers.
+              Content Factory needs an <strong className="text-zinc-200">AI provider</strong> key (Gemini <em>or</em> MiniMax) and an <strong className="text-zinc-200">Upload-Post</strong> API key. Both have free tiers.
             </p>
 
             {/* Gemini block */}
@@ -1049,8 +1096,38 @@ function App() {
               )}
             </div>
 
+            {/* MiniMax block */}
+            <div className={`rounded-lg p-4 space-y-2 border ${!minimaxKey ? 'bg-violet-500/5 border-violet-500/30' : 'bg-white/5 border-white/10 opacity-70'}`}>
+              <p className="text-xs font-semibold text-zinc-200 flex items-center gap-2">
+                {minimaxKey ? <Check size={12} className="text-green-400" /> : <AlertTriangle size={12} className="text-amber-400" />}
+                MiniMax API Key {minimaxKey && <span className="text-green-400">— set</span>}{!minimaxKey && !apiKey && <span className="text-amber-400/70 ml-1">(alternative)</span>}
+              </p>
+              {!minimaxKey && (
+                <>
+                  <p className="text-xs text-zinc-400">
+                    Use MiniMax instead of Gemini for video analysis, titles, and edits. Same OpenAI-compatible API.
+                  </p>
+                  <ol className="text-xs text-zinc-400 space-y-1 list-decimal list-inside">
+                    <li>Go to <a href="https://api.MiniMax.io" target="_blank" rel="noopener noreferrer" className="text-violet-400 underline">api.MiniMax.io</a></li>
+                    <li>Sign in and create an API key</li>
+                    <li>Copy the key (starts with <code className="text-violet-300">sk-cp-</code> or <code className="text-violet-300">eyJ</code>) and paste it below</li>
+                  </ol>
+                  <input
+                    type="text"
+                    placeholder="sk-cp-..."
+                    className="w-full bg-black/50 border border-white/20 rounded-lg px-4 py-2.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-violet-500"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && e.target.value.trim()) {
+                        setMinimaxKey(e.target.value.trim());
+                      }
+                    }}
+                  />
+                </>
+              )}
+            </div>
+
             {/* Upload-Post block */}
-            <div className={`rounded-lg p-4 space-y-2 border ${!uploadPostKey ? 'bg-violet-500/5 border-violet-500/30' : 'bg-white/5 border-white/10 opacity-70'}`}>
+            <div className={`rounded-lg p-4 space-y-2 border ${!uploadPostKey ? 'bg-emerald-500/5 border-emerald-500/30' : 'bg-white/5 border-white/10 opacity-70'}`}>
               <p className="text-xs font-semibold text-zinc-200 flex items-center gap-2">
                 {uploadPostKey ? <Check size={12} className="text-green-400" /> : <AlertTriangle size={12} className="text-amber-400" />}
                 Upload-Post API Key {uploadPostKey && <span className="text-green-400">— set</span>}
@@ -1069,7 +1146,7 @@ function App() {
                   <input
                     type="text"
                     placeholder="Paste your Upload-Post API key here..."
-                    className="w-full bg-black/50 border border-white/20 rounded-lg px-4 py-2.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-violet-500"
+                    className="w-full bg-black/50 border border-white/20 rounded-lg px-4 py-2.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-emerald-500"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && e.target.value.trim()) {
                         setUploadPostKey(e.target.value.trim());

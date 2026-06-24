@@ -39,6 +39,40 @@ DEFAULT_VOICES = {
 
 GEMINI_MODEL = "gemini-3-flash-preview"
 
+# Lazy import to avoid hard dependency on google-genai for MiniMax-only users
+from minimax_client import get_client as get_ai_client, resolve_key as resolve_ai_key, MINIMAX, GEMINI
+
+def _provider_for(key: str) -> str:
+    """Detect provider from a key string (used when callers don't pass provider explicitly)."""
+    if not key:
+        return GEMINI
+    # MiniMax keys come in two shapes:
+    #   - JWT-style: "eyJ..."
+    #   - API-key style: "sk-cp-..."
+    if key.startswith("eyJ") or key.startswith("sk-cp-"):
+        return MINIMAX
+    return GEMINI
+
+MINIMAX_MODEL = os.getenv("MINIMAX_MODEL", "MiniMax-M3")
+
+
+class _MiniMaxCfg:
+    """Lightweight config object that the MiniMax client understands."""
+
+    def __init__(self, response_mime_type: str = None):
+        self.response_mime_type = response_mime_type
+
+
+def _build_config(provider: str, with_search: bool = False):
+    """Return a GenerateContentConfig-shaped object for either provider."""
+    if provider == GEMINI:
+        cfg_kwargs = {}
+        if with_search:
+            cfg_kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
+        return types.GenerateContentConfig(**cfg_kwargs)
+    # MiniMax doesn't support Google Search grounding via the chat API
+    return _MiniMaxCfg()
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Phase 1: Website Scraping, Web Research & Analysis
@@ -55,7 +89,8 @@ def research_saas_online(url: str, gemini_key: str) -> dict:
 
     print(f"[SaaSShorts] 🔍 Researching {url} across the web (Google Search grounding)...")
 
-    client = genai.Client(api_key=gemini_key)
+    provider = _provider_for(gemini_key)
+    client = get_ai_client(provider, gemini_key)
 
     # Extract domain name for search queries
     domain = url.replace("https://", "").replace("http://", "").split("/")[0]
@@ -101,11 +136,9 @@ Return a comprehensive JSON research report:
 Be thorough. Use REAL data from your search results, not made-up information."""
 
     response = client.models.generate_content(
-        model=GEMINI_MODEL,
+        model=GEMINI_MODEL if provider == GEMINI else MINIMAX_MODEL,
         contents=[prompt],
-        config=types.GenerateContentConfig(
-            tools=[types.Tool(google_search=types.GoogleSearch())],
-        ),
+        config=_build_config(provider, with_search=True),
     )
 
     # Extract grounding sources
@@ -246,7 +279,8 @@ def analyze_saas(scraped_data: dict, gemini_key: str, web_research: dict = None)
 
     print(f"[SaaSShorts] 🧠 Analyzing {scraped_data['url']} (with web research)...")
 
-    client = genai.Client(api_key=gemini_key)
+    provider = _provider_for(gemini_key)
+    client = get_ai_client(provider, gemini_key)
 
     # Build web research context
     research_context = ""
@@ -333,9 +367,9 @@ IMPORTANT: Use REAL pain points from user reviews when available. Real frustrati
 Include 5-8 pain points, 4-6 emotional hooks, and 4+ viral angles."""
 
     response = client.models.generate_content(
-        model=GEMINI_MODEL,
+        model=GEMINI_MODEL if provider == GEMINI else MINIMAX_MODEL,
         contents=[prompt],
-        config=types.GenerateContentConfig(response_mime_type="application/json"),
+        config=types.GenerateContentConfig(response_mime_type="application/json") if provider == GEMINI else _MiniMaxCfg("application/json"),
     )
 
     raw = response.text
@@ -380,7 +414,8 @@ def generate_scripts(
     lang_name = "Spanish" if language == "es" else "English"
     print(f"[SaaSShorts] 📝 Generating {num_scripts} scripts ({style}, {lang_name})...")
 
-    client = genai.Client(api_key=gemini_key)
+    provider = _provider_for(gemini_key)
+    client = get_ai_client(provider, gemini_key)
 
     style_guide = {
         "ugc": "Natural, authentic UGC style. Person talking to camera like sharing a discovery with a friend. Casual, genuine.",
@@ -515,12 +550,12 @@ RULES:
 - Example male: "a 29 year old european man, short dark hair, light stubble, wearing a navy t-shirt, smart casual look" """
 
     response = client.models.generate_content(
-        model=GEMINI_MODEL,
+        model=GEMINI_MODEL if provider == GEMINI else MINIMAX_MODEL,
         contents=[prompt],
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             max_output_tokens=8192,
-        ),
+        ) if provider == GEMINI else _MiniMaxCfg("application/json"),
     )
 
     raw = response.text

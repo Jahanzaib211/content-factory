@@ -318,11 +318,14 @@ async def process_endpoint(
     request: Request,
     file: Optional[UploadFile] = File(None),
     url: Optional[str] = Form(None),
-    acknowledged: Optional[str] = Form(None)
+    acknowledged: Optional[str] = Form(None),
+    x_gemini_key: Optional[str] = Header(None, alias="X-Gemini-Key"),
+    x_minimax_key: Optional[str] = Header(None, alias="X-MiniMax-Key"),
 ):
-    api_key = request.headers.get("X-Gemini-Key")
-    if not api_key:
-        raise HTTPException(status_code=400, detail="Missing X-Gemini-Key header")
+    gemini_key = x_gemini_key
+    minimax_key = x_minimax_key
+    if not gemini_key and not minimax_key:
+        raise HTTPException(status_code=400, detail="Missing X-Gemini-Key or X-MiniMax-Key header")
 
     ack_flag = str(acknowledged).lower() in ("1", "true", "yes")
 
@@ -363,7 +366,10 @@ async def process_endpoint(
     # Prepare Command
     cmd = ["python", "-u", "main.py"] # -u for unbuffered
     env = os.environ.copy()
-    env["GEMINI_API_KEY"] = api_key # Override with key from request
+    if gemini_key:
+        env["GEMINI_API_KEY"] = gemini_key
+    if minimax_key:
+        env["MINIMAX_API_KEY"] = minimax_key
 
     if url:
         cmd.extend(["-u", url])
@@ -421,23 +427,33 @@ from subtitles import generate_srt, burn_subtitles, generate_srt_from_video
 from hooks import add_hook_to_video
 from translate import translate_video, get_supported_languages
 from thumbnail import analyze_video_for_titles, refine_titles, generate_thumbnail, generate_youtube_description
+from minimax_client import resolve_key as resolve_ai_key, get_client as get_ai_client
 
 class EditRequest(BaseModel):
     job_id: str
     clip_index: int
     api_key: Optional[str] = None
+    api_key_override: Optional[str] = None
+    provider: Optional[str] = None  # "gemini" or "minimax"
     input_filename: Optional[str] = None
 
 @app.post("/api/edit")
 async def edit_clip(
     req: EditRequest,
-    x_gemini_key: Optional[str] = Header(None, alias="X-Gemini-Key")
+    x_gemini_key: Optional[str] = Header(None, alias="X-Gemini-Key"),
+    x_minimax_key: Optional[str] = Header(None, alias="X-MiniMax-Key"),
 ):
-    # Determine API Key
-    final_api_key = req.api_key or x_gemini_key or os.environ.get("GEMINI_API_KEY")
-    
+    # Determine API Key (MiniMax preferred when set, else Gemini)
+    try:
+        provider, final_api_key = resolve_ai_key(
+            req.api_key_override or x_minimax_key,
+            req.api_key or x_gemini_key or os.environ.get("GEMINI_API_KEY"),
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Missing API Key (Header or Body)")
+
     if not final_api_key:
-        raise HTTPException(status_code=400, detail="Missing Gemini API Key (Header or Body)")
+        raise HTTPException(status_code=400, detail="Missing API Key (Header or Body)")
 
     if req.job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -469,7 +485,7 @@ async def edit_clip(
         # Run editing in a thread to avoid blocking main loop
         # Since VideoEditor uses blocking calls (subprocess, API wait)
         def run_edit():
-            editor = VideoEditor(api_key=final_api_key)
+            editor = VideoEditor(api_key=final_api_key, provider=provider)
             
             # SAFE FILE RENAMING STRATEGY (Avoid UnicodeEncodeError in Docker)
             # Create a safe ASCII filename in the same directory
@@ -647,13 +663,20 @@ class EffectsGenerateRequest(BaseModel):
 @app.post("/api/effects/generate")
 async def generate_effects_config(
     req: EffectsGenerateRequest,
-    x_gemini_key: Optional[str] = Header(None, alias="X-Gemini-Key")
+    x_gemini_key: Optional[str] = Header(None, alias="X-Gemini-Key"),
+    x_minimax_key: Optional[str] = Header(None, alias="X-MiniMax-Key"),
 ):
-    """Generate structured EffectsConfig JSON for Remotion rendering via Gemini AI."""
-    final_api_key = x_gemini_key or os.environ.get("GEMINI_API_KEY")
+    """Generate structured EffectsConfig JSON for Remotion rendering via AI provider."""
+    try:
+        provider, final_api_key = resolve_ai_key(
+            x_minimax_key,
+            x_gemini_key or os.environ.get("GEMINI_API_KEY"),
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Missing API Key (Header)")
 
     if not final_api_key:
-        raise HTTPException(status_code=400, detail="Missing Gemini API Key (Header)")
+        raise HTTPException(status_code=400, detail="Missing API Key (Header)")
 
     if req.job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -676,7 +699,7 @@ async def generate_effects_config(
             raise HTTPException(status_code=404, detail=f"Video file not found: {input_path}")
 
         def run_effects_generation():
-            editor = VideoEditor(api_key=final_api_key)
+            editor = VideoEditor(api_key=final_api_key, provider=provider)
 
             # Create safe ASCII filename to avoid encoding issues
             safe_filename = f"temp_effects_{req.job_id}.mp4"
@@ -1273,12 +1296,14 @@ async def thumbnail_analyze(
     file: Optional[UploadFile] = File(None),
     url: Optional[str] = Form(None),
     session_id: Optional[str] = Form(None),
-    x_gemini_key: Optional[str] = Header(None, alias="X-Gemini-Key")
+    x_gemini_key: Optional[str] = Header(None, alias="X-Gemini-Key"),
+    x_minimax_key: Optional[str] = Header(None, alias="X-MiniMax-Key"),
 ):
     """Analyze a video and suggest viral YouTube titles."""
-    api_key = x_gemini_key
-    if not api_key:
-        raise HTTPException(status_code=400, detail="Missing X-Gemini-Key header")
+    try:
+        provider, api_key = resolve_ai_key(x_minimax_key, x_gemini_key)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Missing X-Gemini-Key or X-MiniMax-Key header")
 
     pre_transcript = None
 
@@ -1320,7 +1345,7 @@ async def thumbnail_analyze(
     try:
         # Run analysis in thread pool (skips Whisper if pre_transcript is available)
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, analyze_video_for_titles, api_key, video_path, pre_transcript)
+        result = await loop.run_in_executor(None, analyze_video_for_titles, api_key, video_path, pre_transcript, provider)
 
         # Store/update session context
         if session_id not in thumbnail_sessions:
@@ -1357,12 +1382,14 @@ class ThumbnailTitlesRequest(BaseModel):
 @app.post("/api/thumbnail/titles")
 async def thumbnail_titles(
     req: ThumbnailTitlesRequest,
-    x_gemini_key: Optional[str] = Header(None, alias="X-Gemini-Key")
+    x_gemini_key: Optional[str] = Header(None, alias="X-Gemini-Key"),
+    x_minimax_key: Optional[str] = Header(None, alias="X-MiniMax-Key"),
 ):
     """Refine title suggestions or accept a manual title."""
-    api_key = x_gemini_key
-    if not api_key:
-        raise HTTPException(status_code=400, detail="Missing X-Gemini-Key header")
+    try:
+        provider, api_key = resolve_ai_key(x_minimax_key, x_gemini_key)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Missing X-Gemini-Key or X-MiniMax-Key header")
 
     # Manual title mode - just create a session with the user's title
     if req.title:
@@ -1396,7 +1423,8 @@ async def thumbnail_titles(
             api_key,
             session["context"],
             req.message,
-            session["conversation"]
+            session["conversation"],
+            provider,
         )
 
         new_titles = result.get("titles", [])
@@ -1419,12 +1447,14 @@ async def thumbnail_generate(
     count: int = Form(3),
     face: Optional[UploadFile] = File(None),
     background: Optional[UploadFile] = File(None),
-    x_gemini_key: Optional[str] = Header(None, alias="X-Gemini-Key")
+    x_gemini_key: Optional[str] = Header(None, alias="X-Gemini-Key"),
+    x_minimax_key: Optional[str] = Header(None, alias="X-MiniMax-Key"),
 ):
-    """Generate YouTube thumbnails with Gemini image generation."""
-    api_key = x_gemini_key
-    if not api_key:
-        raise HTTPException(status_code=400, detail="Missing X-Gemini-Key header")
+    """Generate YouTube thumbnails with the AI provider (Gemini image or MiniMax placeholder)."""
+    try:
+        provider, api_key = resolve_ai_key(x_minimax_key, x_gemini_key)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Missing X-Gemini-Key or X-MiniMax-Key header")
 
     # Clamp count
     count = min(max(1, count), 6)
@@ -1463,11 +1493,12 @@ async def thumbnail_generate(
             bg_path,
             extra_prompt,
             count,
-            video_context
+            video_context,
+            provider,
         )
 
         if not thumbnails:
-            raise HTTPException(status_code=500, detail="Thumbnail generation failed. Please check your Gemini API key has access to image generation (gemini-3.1-flash-image-preview model).")
+            raise HTTPException(status_code=500, detail="Thumbnail generation failed. Please check your API key has access to image generation.")
 
         return {"thumbnails": thumbnails}
 
@@ -1485,12 +1516,14 @@ class ThumbnailDescribeRequest(BaseModel):
 @app.post("/api/thumbnail/describe")
 async def thumbnail_describe(
     req: ThumbnailDescribeRequest,
-    x_gemini_key: Optional[str] = Header(None, alias="X-Gemini-Key")
+    x_gemini_key: Optional[str] = Header(None, alias="X-Gemini-Key"),
+    x_minimax_key: Optional[str] = Header(None, alias="X-MiniMax-Key"),
 ):
     """Generate a YouTube description with chapters from the transcript."""
-    api_key = x_gemini_key
-    if not api_key:
-        raise HTTPException(status_code=400, detail="Missing X-Gemini-Key header")
+    try:
+        provider, api_key = resolve_ai_key(x_minimax_key, x_gemini_key)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Missing X-Gemini-Key or X-MiniMax-Key header")
 
     if req.session_id not in thumbnail_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -1509,7 +1542,8 @@ async def thumbnail_describe(
             req.title,
             segments,
             session.get("language", "en"),
-            session.get("video_duration", 0)
+            session.get("video_duration", 0),
+            provider,
         )
         return {"description": result.get("description", "")}
 
@@ -1671,11 +1705,16 @@ class SaaSAnalyzeRequest(BaseModel):
 async def saasshorts_analyze(
     req: SaaSAnalyzeRequest,
     x_gemini_key: Optional[str] = Header(None, alias="X-Gemini-Key"),
+    x_minimax_key: Optional[str] = Header(None, alias="X-MiniMax-Key"),
 ):
     """Analyze a URL or manual description and generate video scripts."""
-    gemini_key = x_gemini_key or os.environ.get("GEMINI_API_KEY")
-    if not gemini_key:
-        raise HTTPException(status_code=400, detail="Missing Gemini API Key")
+    try:
+        _provider, gemini_key = resolve_ai_key(
+            x_minimax_key,
+            x_gemini_key or os.environ.get("GEMINI_API_KEY"),
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Missing API Key (X-Gemini-Key or X-MiniMax-Key header)")
 
     if not req.url and not req.description:
         raise HTTPException(status_code=400, detail="Provide a URL or a product description")
@@ -1938,10 +1977,10 @@ async def gallery_html_page():
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AI UGC Video Gallery | OpenShorts</title>
+<title>AI UGC Video Gallery | Content Factory</title>
 <meta name="description" content="Browse {len(videos)} AI-generated UGC marketing videos. Create viral TikTok and Instagram Reels for your SaaS product.">
 <meta name="robots" content="index, follow">
-<meta property="og:title" content="AI UGC Video Gallery | OpenShorts">
+<meta property="og:title" content="AI UGC Video Gallery | Content Factory">
 <meta property="og:type" content="website">
 <meta property="og:description" content="Browse AI-generated UGC marketing videos for SaaS products.">
 <script type="application/ld+json">{ld_json}</script>
@@ -1956,7 +1995,7 @@ h1{{font-size:28px;font-weight:700;padding:40px 20px 0;text-align:center}}
 </style>
 </head>
 <body>
-<nav><strong style="font-size:18px">OpenShorts</strong><a href="/" class="cta">Create Your Video</a></nav>
+<nav><strong style="font-size:18px">Content Factory</strong><a href="/" class="cta">Create Your Video</a></nav>
 <h1>AI-Generated UGC Videos</h1>
 <p class="subtitle">{len(videos)} videos generated · Low Cost & Premium modes</p>
 <div class="grid">{cards_html}</div>
@@ -1997,7 +2036,7 @@ async def video_html_page(video_id: str):
 <html lang="{language}">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{title} - AI UGC Video | OpenShorts</title>
+<title>{title} - AI UGC Video | Content Factory</title>
 <meta name="description" content="{caption} {hashtags}">
 <meta property="og:type" content="video.other">
 <meta property="og:title" content="{title}">
@@ -2029,7 +2068,7 @@ h1{{font-size:22px;font-weight:700;margin-bottom:8px}}
 </style>
 </head>
 <body>
-<nav><strong>OpenShorts</strong><a href="/gallery">Gallery</a><span style="color:#3f3f46">›</span><span style="color:#e4e4e7;font-size:14px">{title}</span></nav>
+<nav><strong>Content Factory</strong><a href="/gallery">Gallery</a><span style="color:#3f3f46">›</span><span style="color:#e4e4e7;font-size:14px">{title}</span></nav>
 <div class="container">
 <div><video src="{video_url}" poster="{actor_url}" controls autoplay playsinline style="aspect-ratio:9/16;object-fit:cover"></video></div>
 <div>

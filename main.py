@@ -792,20 +792,26 @@ def transcribe_video(video_path):
     }
 
 def get_viral_clips(transcript_result, video_duration):
-    print("🤖  Analyzing with Gemini...")
-    
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        print("❌ Error: GEMINI_API_KEY not found in environment variables.")
+    from minimax_client import resolve_key_from_env, get_client as get_ai_client, GEMINI, MINIMAX
+
+    # Pick provider based on which key is set (MiniMax preferred, else Gemini)
+    try:
+        provider, api_key = resolve_key_from_env()
+    except ValueError as e:
+        print(f"❌ {e}")
         return None
 
+    print(f"🤖  Analyzing with {provider}...")
 
-    client = genai.Client(api_key=api_key)
-    
-    # We use gemini-2.5-flash as requested.
-    model_name = 'gemini-2.5-flash' 
-    
-    print(f"🤖  Initializing Gemini with model: {model_name}")
+    client = get_ai_client(provider, api_key)
+
+    # Model selection per provider
+    if provider == MINIMAX:
+        model_name = os.getenv("MINIMAX_MODEL", "MiniMax-M3")
+    else:
+        model_name = 'gemini-2.5-flash'
+
+    print(f"🤖  Initializing {provider} with model: {model_name}")
 
     # Extract words
     words = []

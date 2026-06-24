@@ -6,7 +6,7 @@ import HookModal from './HookModal';
 import TranslateModal from './TranslateModal';
 import { renderInBrowser } from '../lib/renderInBrowser';
 
-export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUserId, geminiApiKey, elevenLabsKey, onPlay, onPause }) {
+export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUserId, geminiApiKey, minimaxApiKey, elevenLabsKey, onPlay, onPause }) {
     const [showModal, setShowModal] = useState(false);
     const [showSubtitleModal, setShowSubtitleModal] = useState(false);
     const videoRef = React.useRef(null);
@@ -65,10 +65,12 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
         setIsEditing(true);
         setEditError(null);
         try {
-            const apiKey = geminiApiKey || localStorage.getItem('gemini_key');
+            const aiHeaders = {};
+            if (geminiApiKey) aiHeaders['X-Gemini-Key'] = geminiApiKey;
+            if (minimaxApiKey) aiHeaders['X-MiniMax-Key'] = minimaxApiKey;
 
-            if (!apiKey) {
-                throw new Error("Gemini API Key is missing. Please set it in Settings.");
+            if (!geminiApiKey && !minimaxApiKey) {
+                throw new Error("AI Provider Key is missing. Set your Gemini or MiniMax API key in Settings.");
             }
 
             // Try Remotion effects endpoint first
@@ -76,7 +78,7 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-Gemini-Key': apiKey
+                    ...aiHeaders
                 },
                 body: JSON.stringify({
                     job_id: jobId,
@@ -108,7 +110,7 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-Gemini-Key': apiKey
+                    ...aiHeaders
                 },
                 body: JSON.stringify({
                     job_id: jobId,

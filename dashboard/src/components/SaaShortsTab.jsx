@@ -34,7 +34,7 @@ function saveCache(url, analysis, webResearch, scripts) {
   } catch { /* localStorage full */ }
 }
 
-export default function SaaShortsTab({ geminiApiKey, elevenLabsKey, falKey, uploadPostKey, uploadUserId }) {
+export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKey, falKey, uploadPostKey, uploadUserId }) {
   // Wizard state
   const [step, setStep] = useState(() => {
     const cache = loadCache();
@@ -186,8 +186,8 @@ export default function SaaShortsTab({ geminiApiKey, elevenLabsKey, falKey, uplo
 
   const handleAnalyze = async () => {
     if (!url.trim() && !description.trim()) return;
-    if (!geminiApiKey) {
-      setAnalyzeError('Gemini API key required. Set it in Settings.');
+    if (!geminiApiKey && !minimaxApiKey) {
+      setAnalyzeError('AI provider key required. Set Gemini or MiniMax in Settings.');
       return;
     }
 
@@ -195,12 +195,12 @@ export default function SaaShortsTab({ geminiApiKey, elevenLabsKey, falKey, uplo
     setAnalyzeError('');
 
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (geminiApiKey) headers['X-Gemini-Key'] = geminiApiKey;
+      if (minimaxApiKey) headers['X-MiniMax-Key'] = minimaxApiKey;
       const res = await fetch(getApiUrl('/api/saasshorts/analyze'), {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Gemini-Key': geminiApiKey,
-        },
+        headers,
         body: JSON.stringify({
           url: url.trim() || undefined,
           description: description.trim() || undefined,

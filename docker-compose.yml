@@ -2,12 +2,19 @@ services:
   backend:
     build: .
     container_name: openshorts-backend
+    user: "1000:1000"
     ports:
-      - "8000:8000"
+      - "18080:8000"
     volumes:
       - .:/app
       - /app/__pycache__
       - ./output:/app/output
+    environment:
+      - HOME=/tmp
+      - USER=appuser
+      - TORCH_HOME=/tmp/torch
+      - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor
+      - ULTRALYTICS_CONFIG_DIR=/tmp/Ultralytics
     restart: unless-stopped
 
   frontend:
@@ -28,7 +35,7 @@ services:
       dockerfile: render-service/Dockerfile
     container_name: openshorts-renderer
     ports:
-      - "3100:3100"
+      - "13100:3100"
     volumes:
       - ./output:/output
     environment:

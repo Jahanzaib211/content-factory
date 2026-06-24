@@ -4,6 +4,18 @@ FROM python:3.11-slim AS builder
 WORKDIR /app
 
 # Install build dependencies
+# Replace /etc/apt/sources.list.d/debian.sources with a minimal DEB822 file pointing
+# at ftp.us.debian.org (faster US mirror) and NO security component. The
+# trixie-security suite isn't published on ftp.us.debian.org, which makes
+# 'apt-get update' fail with exit code 100. Build-time apt doesn't need security
+# updates. Single-quoted heredoc disables all shell expansion.
+RUN cat > /etc/apt/sources.list.d/debian.sources <<'DEBIAN_EOF'
+Types: deb
+URIs: http://ftp.us.debian.org/debian
+Suites: trixie trixie-updates
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+DEBIAN_EOF
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
@@ -22,6 +34,18 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install FFmpeg, OpenCV dependencies, and Node.js (for yt-dlp JS challenges)
+# Replace /etc/apt/sources.list.d/debian.sources with a minimal DEB822 file pointing
+# at ftp.us.debian.org (faster US mirror) and NO security component. The
+# trixie-security suite isn't published on ftp.us.debian.org, which makes
+# 'apt-get update' fail with exit code 100. Build-time apt doesn't need security
+# updates. Single-quoted heredoc disables all shell expansion.
+RUN cat > /etc/apt/sources.list.d/debian.sources <<'DEBIAN_EOF'
+Types: deb
+URIs: http://ftp.us.debian.org/debian
+Suites: trixie trixie-updates
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+DEBIAN_EOF
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libgl1 \

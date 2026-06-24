@@ -5,11 +5,12 @@ import json
 from google import genai
 from google.genai import types
 from PIL import Image
+from minimax_client import get_client as get_ai_client, resolve_key, MINIMAX, GEMINI
 
 
-def analyze_video_for_titles(api_key, video_path, transcript=None):
+def analyze_video_for_titles(api_key, video_path, transcript=None, provider: str = None):
     """
-    Transcribes a video and uses Gemini to suggest viral YouTube titles.
+    Transcribes a video and uses AI (Gemini or MiniMax) to suggest viral YouTube titles.
     If transcript is provided, skips Whisper transcription.
     Returns: { "titles": [...], "transcript_summary": "...", "language": "...", "segments": [...], "video_duration": ... }
     """
@@ -20,17 +21,19 @@ def analyze_video_for_titles(api_key, video_path, transcript=None):
     else:
         print("🎬 [Thumbnail] Using pre-computed transcript (Whisper already done)...")
 
-    print("📤 [Thumbnail] Uploading video to Gemini...")
-    client = genai.Client(api_key=api_key)
+    provider = provider or GEMINI
+    print(f"📤 [Thumbnail] Uploading video to {provider}...")
+    client = get_ai_client(provider, api_key)
 
     file_upload = client.files.upload(file=video_path)
-    while True:
-        file_info = client.files.get(name=file_upload.name)
-        if file_info.state == "ACTIVE":
-            break
-        elif file_info.state == "FAILED":
-            raise Exception("Video processing failed by Gemini.")
-        time.sleep(2)
+    if provider == GEMINI:
+        while True:
+            file_info = client.files.get(name=file_upload.name)
+            if file_info.state == "ACTIVE":
+                break
+            elif file_info.state == "FAILED":
+                raise Exception("Video processing failed by Gemini.")
+            time.sleep(2)
 
     prompt = f"""You are a YouTube title expert who creates viral, click-worthy titles.
 
@@ -108,11 +111,12 @@ OUTPUT JSON:
         }
 
 
-def refine_titles(api_key, context, user_message, conversation_history=None):
+def refine_titles(api_key, context, user_message, conversation_history=None, provider: str = None):
     """
     Takes video context + user feedback and returns refined title suggestions.
     """
-    client = genai.Client(api_key=api_key)
+    provider = provider or GEMINI
+    client = get_ai_client(provider, api_key)
 
     history_text = ""
     if conversation_history:
@@ -171,12 +175,21 @@ OUTPUT JSON:
         return {"titles": ["Could not refine titles - please try again"]}
 
 
-def generate_thumbnail(api_key, title, session_id, face_image_path=None, bg_image_path=None, extra_prompt="", count=3, video_context=""):
+def generate_thumbnail(api_key, title, session_id, face_image_path=None, bg_image_path=None, extra_prompt="", count=3, video_context="", provider: str = None):
     """
-    Generates YouTube thumbnails using Gemini image generation.
+    Generates YouTube thumbnails using the AI provider.
+    Gemini uses image generation; MiniMax uses text-only fallback (placeholder image with text overlay).
     Returns list of saved image paths (relative URLs).
     """
-    client = genai.Client(api_key=api_key)
+    provider = provider or GEMINI
+    client = get_ai_client(provider, api_key)
+
+    # MiniMax does not yet expose image generation through the chat API used here.
+    # Fall back to a text-only "thumbnail plan" returned to the frontend; the
+    # frontend can render a styled title card if no image is returned.
+    if provider == MINIMAX:
+        print("🎨 [Thumbnail] MiniMax provider — returning text-based thumbnail concept.")
+        return _generate_minimax_text_thumbnail(api_key, title, session_id, extra_prompt, count, video_context)
 
     output_dir = os.path.join("output", "thumbnails", session_id)
     os.makedirs(output_dir, exist_ok=True)
@@ -273,12 +286,13 @@ DESIGN REQUIREMENTS:
     return thumbnails
 
 
-def generate_youtube_description(api_key, title, transcript_segments, language, video_duration):
+def generate_youtube_description(api_key, title, transcript_segments, language, video_duration, provider: str = None):
     """
-    Uses Gemini to generate a YouTube description with chapter markers from transcript segments.
+    Uses AI provider (Gemini or MiniMax) to generate a YouTube description with chapter markers.
     Returns: { "description": "full description text with chapters" }
     """
-    client = genai.Client(api_key=api_key)
+    provider = provider or GEMINI
+    client = get_ai_client(provider, api_key)
 
     # Format segments for the prompt
     formatted_segments = []
@@ -333,3 +347,61 @@ OUTPUT: Return ONLY the description text (no JSON wrapper, no markdown code bloc
         description = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
     return {"description": description}
+
+
+def _generate_minimax_text_thumbnail(api_key, title, session_id, extra_prompt, count, video_context):
+    """
+    MiniMax doesn't expose image generation through the chat API used here, so we
+    render styled placeholder thumbnails (gradient + big text) and return their URLs.
+    The frontend can swap in a richer image once one is available.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    output_dir = os.path.join("output", "thumbnails", session_id)
+    os.makedirs(output_dir, exist_ok=True)
+
+    palettes = [
+        ((255, 87, 34), (255, 193, 7)),    # orange → amber
+        ((124, 58, 237), (236, 72, 153)),  # violet → pink
+        ((14, 165, 233), (99, 102, 241)),  # sky → indigo
+    ]
+    thumbs = []
+    for i in range(count):
+        a, b = palettes[i % len(palettes)]
+        img = Image.new("RGB", (1280, 720), a)
+        draw = ImageDraw.Draw(img)
+        # vertical gradient toward palette[1]
+        for y in range(720):
+            ratio = y / 720
+            r = int(a[0] * (1 - ratio) + b[0] * ratio)
+            g = int(a[1] * (1 - ratio) + b[1] * ratio)
+            bl = int(a[2] * (1 - ratio) + b[2] * ratio)
+            draw.line([(0, y), (1280, y)], fill=(r, g, bl))
+
+        text = (title or "VIRAL").upper()
+        if extra_prompt:
+            text = extra_prompt.upper()[:60] or text
+
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 96)
+        except Exception:
+            font = ImageFont.load_default()
+
+        bbox = draw.textbbox((0, 0), text, font=font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        draw.text(((1280 - tw) / 2, (720 - th) / 2 - 20), text, fill=(255, 255, 255), font=font, stroke_width=4, stroke_fill=(0, 0, 0))
+
+        # MiniMax watermark so users know the source
+        try:
+            small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 28)
+        except Exception:
+            small = ImageFont.load_default()
+        draw.text((24, 680), "Generated via MiniMax", fill=(255, 255, 255, 200), font=small)
+
+        filename = f"thumb_{i + 1}.jpg"
+        filepath = os.path.join(output_dir, filename)
+        img.save(filepath, quality=92)
+        thumbs.append(f"/thumbnails/{session_id}/{filename}")
+        print(f"✅ [Thumbnail] Saved MiniMax placeholder thumbnail: {filepath}")
+
+    return thumbs
