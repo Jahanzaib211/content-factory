@@ -10,6 +10,7 @@ import SaaShortsTab from './components/SaaShortsTab';
 import UGCGallery from './components/UGCGallery';
 import ScheduleWeekModal from './components/ScheduleWeekModal';
 import { getApiUrl } from './config';
+import { I18nProvider, useT } from './i18n/I18nProvider';
 
 // Enhanced "Encryption" using XOR + Base64 with a Salt
 // This is better than plain Base64 but still client-side.
@@ -734,6 +735,7 @@ function EnginePicker({ enginesByCap, enginesHealth, onRefresh }) {
 }
 
 function App() {
+  const t = useT();
   const [apiKey, setApiKey] = useState(localStorage.getItem('gemini_key') || '');
   const [minimaxKey, setMinimaxKey] = useState(() => {
     const stored = localStorage.getItem('minimax_key_v1');
@@ -1255,7 +1257,7 @@ function App() {
           {activeTab === 'settings' && (
             <div className="h-full overflow-y-auto p-8 max-w-2xl mx-auto animate-[fadeIn_0.3s_ease-out]">
               <div className="flex items-center justify-between mb-8">
-                <h1 className="text-2xl font-bold">Settings</h1>
+                <h1 className="text-2xl font-bold">{t('settings.title')}</h1>
                 <div className="px-3 py-1 bg-green-500/10 border border-green-500/20 rounded-full text-[10px] text-green-400 font-medium flex items-center gap-2">
                   <Shield size={12} /> Privacy: keys only live in your browser (sent to backend just to process)
                 </div>
@@ -1513,6 +1515,28 @@ function App() {
                 >
                   Refresh health
                 </button>
+              </div>
+
+              {/* ── Content Factory: Multilingual settings card ── */}
+              <div className="glass-panel p-6 mt-8">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold">Multilingual</h2>
+                  <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded text-emerald-400 uppercase tracking-wider">Built-in</span>
+                </div>
+                <p className="text-xs text-zinc-500 mb-4 leading-relaxed">
+                  Pick the dashboard language. Content translation (STT → LLM → TTS) is handled by the Multilingual panel.
+                </p>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-zinc-400">UI language:</span>
+                  <LangPicker />
+                  <a
+                    href="#/multilingual"
+                    onClick={() => setActiveTab('multilingual')}
+                    className="ml-auto text-xs text-emerald-400 hover:text-emerald-300"
+                  >
+                    Open Multilingual panel →
+                  </a>
+                </div>
               </div>
 
               {/* ── Content Factory: Direct Social OAuth (free tier) ── */}
@@ -1963,4 +1987,25 @@ function App() {
   );
 }
 
-export default App;
+function LangPicker() {
+  const { lang, setLang, SUPPORTED } = useT();
+  return (
+    <select
+      value={lang}
+      onChange={(e) => setLang(e.target.value)}
+      className="bg-black/50 border border-white/20 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500"
+    >
+      {SUPPORTED.map((l) => (
+        <option key={l} value={l}>{l.toUpperCase()}</option>
+      ))}
+    </select>
+  );
+}
+
+export default function WrappedApp() {
+  return (
+    <I18nProvider>
+      <App />
+    </I18nProvider>
+  );
+}

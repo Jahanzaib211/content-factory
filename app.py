@@ -19,6 +19,69 @@ from s3_uploader import upload_job_artifacts, list_all_clips, upload_actor_to_s3
 
 load_dotenv()
 
+# ── Observability: Langfuse + Sentry (optional, env-gated) ─────────
+# Langfuse is the de-facto OSS LLM observability platform (29.7k★, MIT,
+# self-hostable). When LANGFUSE_HOST + LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY
+# are set, every chat completion is wrapped with @observe() to track
+# prompts, tokens, cost, and latency. Without these env vars, it's a
+# no-op (solo deployments skip observability by default).
+
+LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "")
+LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
+LANGFUSE_ENABLED = bool(LANGFUSE_HOST and LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY)
+
+if LANGFUSE_ENABLED:
+    try:
+        from langfuse import Langfuse, observe
+        langfuse_client = Langfuse(
+            public_key=LANGFUSE_PUBLIC_KEY,
+            secret_key=LANGFUSE_SECRET_KEY,
+            host=LANGFUSE_HOST,
+        )
+        log_msg = lambda *a, **k: print(f"[langfuse] {a}", **k)
+        log_msg(f"Langfuse enabled: {LANGFUSE_HOST}")
+    except ImportError:
+        LANGFUSE_ENABLED = False
+        langfuse_client = None
+        print("[langfuse] `langfuse` package not installed; observability disabled")
+else:
+    langfuse_client = None
+    print("[langfuse] LANGFUSE_HOST/KEYS not set in env; observability disabled (no-op)")
+
+
+# Sentry (optional). When SENTRY_DSN is set, we capture every
+# FastAPI exception + render an event in the Sentry UI. Without a
+# DSN, it's a no-op.
+
+SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+if SENTRY_DSN:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        sentry_sdk.init(
+            dsn=SENTRY_DSN,
+            integrations=[FastApiIntegration()],
+            traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+            environment=os.getenv("SENTRY_ENV", "production"),
+        )
+        print(f"[sentry] enabled: {SENTRY_DSN[:30]}...")
+    except ImportError:
+        print("[sentry] `sentry-sdk` not installed; error tracking disabled")
+else:
+    print("[sentry] SENTRY_DSN not set; error tracking disabled (no-op)")
+
+
+def trace_llm_call(name: str, metadata: Optional[Dict[str, Any]] = None) -> Any:
+    """Decorator: if Langfuse is enabled, wrap the function with @observe.
+    Otherwise return the function unchanged (no-op)."""
+    if LANGFUSE_ENABLED:
+        from langfuse import observe as _observe
+        return _observe(name=name)(metadata or {})
+    def _noop(fn):
+        return fn
+    return _noop
+
 # Constants
 UPLOAD_DIR = "uploads"
 OUTPUT_DIR = "output"
@@ -908,6 +971,34 @@ async def langfuse_event_proxy(payload: dict):
 
 # ── Mount /storage/ for local storage engine ─────────────────────────
 app.mount("/storage", StaticFiles(directory=os.getenv("STORAGE_DIR", os.path.join("output", "storage"))), name="storage")
+
+
+# ── i18n messages endpoint (mirrors dashboard/src/i18n/messages.py) ──
+
+@app.get("/api/i18n/messages")
+async def i18n_messages():
+    """Return all UI translations for the dashboard.
+
+    Kept in sync with dashboard/src/i18n/messages.py — when the JS file
+    changes, run `python -c "import sys; sys.path.insert(0, 'dashboard/src/i18n'); from messages import all_messages; print(...)"` to
+    verify, or just update both files in lockstep.
+    """
+    return {
+        "en": {
+            "nav.factory": "Content Factory",
+            "nav.voiceLab": "Voice Lab",
+            "nav.avatarStudio": "Avatar Studio",
+            "nav.multilingual": "Multilingual",
+            "common.loading": "Loading…",
+        },
+        "es": {
+            "nav.factory": "Fábrica de Contenido",
+            "nav.voiceLab": "Laboratorio de Voz",
+            "nav.avatarStudio": "Estudio de Avatar",
+            "nav.multilingual": "Multilingüe",
+            "common.loading": "Cargando…",
+        },
+    }
 
 @app.post("/api/process")
 async def process_endpoint(

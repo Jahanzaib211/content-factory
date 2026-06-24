@@ -15,6 +15,28 @@ services:
       - TORCH_HOME=/tmp/torch
       - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor
       - ULTRALYTICS_CONFIG_DIR=/tmp/Ultralytics
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
+      - MINIMAX_BASE_URL=${MINIMAX_BASE_URL:-https://api.MiniMax.io}
+      - VLLM_API_BASE=http://vllm:8001/v1
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen2.5-7B-Instruct-AWQ}
+      - COMFYUI_BASE_URL=http://comfyui:8002
+      - WAN_BASE_URL=http://wan-video:8003
+      - WHISPER_BASE_URL=http://faster-whisper:8005
+      - COSYVOICE_BASE_URL=http://cosyvoice:8004
+      - STORAGE_BACKEND=${STORAGE_BACKEND:-local}
+      - SEAWEEDFS_ENDPOINT=${SEAWEEDFS_ENDPOINT:-http://seaweedfs:8333}
+      - SEAWEEDFS_ACCESS_KEY=${SEAWEEDFS_ACCESS_KEY:-admin}
+      - SEAWEEDFS_SECRET_KEY=${SEAWEEDFS_SECRET_KEY:-secret}
+      - SEAWEEDFS_BUCKET=${SEAWEEDFS_BUCKET:-content-factory}
+      - YOUTUBE_CLIENT_ID=${YOUTUBE_CLIENT_ID:-}
+      - YOUTUBE_CLIENT_SECRET=${YOUTUBE_CLIENT_SECRET:-}
+      - TIKTOK_CLIENT_KEY=${TIKTOK_CLIENT_KEY:-}
+      - TIKTOK_CLIENT_SECRET=${TIKTOK_CLIENT_SECRET:-}
+      - INSTAGRAM_APP_ID=${INSTAGRAM_APP_ID:-}
+      - INSTAGRAM_APP_SECRET=${INSTAGRAM_APP_SECRET:-}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
     restart: unless-stopped
 
   frontend:
@@ -45,3 +67,139 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+
+  # ── Content Factory: optional self-hosted AI services ─────────────
+  # Each is opt-in: not started by default. Run with:
+  #   docker compose --profile gpu up
+  # All GPU services honour NVIDIA_VISIBLE_DEVICES so multiple services
+  # can share one GPU with sequential loading.
+
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: cf-vllm
+    profiles: ["gpu"]
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-0}
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      - vllm-cache:/cache
+    command: >
+      --model ${VLLM_MODEL:-Qwen2.5-7B-Instruct-AWQ}
+      --quantization awq_marlin
+      --gpu-memory-utilization 0.5
+      --max-model-len 8192
+      --port 8001
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+
+  comfyui:
+    image: ghcr.io/comfy-org/comfyui:latest
+    container_name: cf-comfyui
+    profiles: ["gpu"]
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-0}
+    volumes:
+      - comfyui-models:/root/.cache
+      - ./output:/output
+    ports:
+      - "8002:8000"
+    command: ["python3", "main.py", "--listen", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+
+  wan-video:
+    build:
+      context: .
+      dockerfile: engines/wan_video.Dockerfile
+    container_name: cf-wan-video
+    profiles: ["gpu"]
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-0}
+    volumes:
+      - wan-models:/models
+      - ./output:/output
+    ports:
+      - "8003:8003"
+    command: ["python3", "-m", "engines.wan_server", "--port", "8003"]
+    restart: unless-stopped
+
+  cosyvoice:
+    build:
+      context: .
+      dockerfile: engines/cosyvoice.Dockerfile
+    container_name: cf-cosyvoice
+    profiles: ["gpu"]
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-0}
+      - COSYVOICE_MODEL_DIR=/models/cosyvoice
+    volumes:
+      - cosyvoice-models:/models
+      - ./output/voice_lab:/output
+    ports:
+      - "8004:8004"
+    command: ["python3", "-m", "engines.cosyvoice_server", "--port", "8004"]
+    restart: unless-stopped
+
+  faster-whisper:
+    image: fedirz/faster-whisper-server:latest-cpu
+    container_name: cf-faster-whisper
+    profiles: ["gpu"]
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
+    volumes:
+      - whisper-cache:/root/.cache/huggingface
+    ports:
+      - "8005:8000"
+    restart: unless-stopped
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    container_name: cf-seaweedfs
+    command: ["server", "-dir=/data", "-s3", "-s3.port=8333"]
+    volumes:
+      - seaweedfs-data:/data
+    ports:
+      - "8333:8333"
+    restart: unless-stopped
+
+  langfuse:
+    image: langfuse/langfuse:latest
+    container_name: cf-langfuse
+    profiles: ["observability"]
+    environment:
+      - DATABASE_URL=postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=replace-me
+      - SALT=replace-me
+      - TELEMETRY_ENABLED=false
+    depends_on:
+      - langfuse-db
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  langfuse-db:
+    image: postgres:16-alpine
+    container_name: cf-langfuse-db
+    profiles: ["observability"]
+    environment:
+      - POSTGRES_USER=langfuse
+      - POSTGRES_PASSWORD=langfuse
+      - POSTGRES_DB=langfuse
+    volumes:
+      - langfuse-db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  vllm-cache:
+  comfyui-models:
+  wan-models:
+  cosyvoice-models:
+  whisper-cache:
+  seaweedfs-data:
+  langfuse-db-data:
