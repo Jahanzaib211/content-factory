@@ -146,7 +146,7 @@ export default function ScheduleWeekModal({ isOpen, onClose, clips, jobId, uploa
                 }
 
                 results.push({ index: i, success: true });
-            } catch (e) {
+            } catch (_) {
                 results.push({ index: i, success: false, error: e.message });
             }
 

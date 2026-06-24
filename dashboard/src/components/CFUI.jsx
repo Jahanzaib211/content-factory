@@ -64,10 +64,11 @@ export function EngineStatusPill({ status }) {
 
 // ── Empty state ───────────────────────────────────────────────────
 export function EmptyState({ icon: Icon = Loader2, title, hint, action }) {
+  const IconComp = Icon;
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
       <div className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-4 text-zinc-400">
-        <Icon size={24} />
+        <IconComp size={24} />
       </div>
       <p className="text-zinc-300 font-medium mb-1">{title}</p>
       {hint && <p className="text-xs text-zinc-500 max-w-md">{hint}</p>}
@@ -128,7 +129,7 @@ export function StepIndicator({ steps, current }) {
 let _toastId = 0;
 export function toast(message, kind = 'info', ttl = 4000) {
   if (typeof document === 'undefined') return;
-  const id = ++_toastId;
+  const _id = ++_toastId;
   const colors = {
     info: 'bg-zinc-800 border-zinc-700 text-white',
     success: 'bg-emerald-900/80 border-emerald-500/40 text-emerald-100',

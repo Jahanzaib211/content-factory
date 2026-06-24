@@ -9,7 +9,7 @@ export default function KeyInput({
     placeholder = 'AIzaSy...',
     getKeyHref = 'https://aistudio.google.com/app/apikey',
     getKeyLabel = 'Get your free Gemini API Key here',
-    storageKey = 'gemini_key',
+    storageKey: _storageKey = 'gemini_key',
 }) {
     const [key, setKey] = useState(savedKey || '');
     const [isVisible, setIsVisible] = useState(false);

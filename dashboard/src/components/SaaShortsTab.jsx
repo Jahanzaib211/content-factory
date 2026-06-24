@@ -70,8 +70,11 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
   const [actorGallery, setActorGallery] = useState([]);
   const [loadingGallery, setLoadingGallery] = useState(false);
   const [uploadedActorPreview, setUploadedActorPreview] = useState(null); // {localPreview, serverUrl}
-  const [productPhoto, setProductPhoto] = useState(null); // {preview, serverUrl}
-  const [productDescription, setProductDescription] = useState('');
+  // productPhoto and productDescription are reserved for a future product-presence feature.
+  // eslint-disable-next-line no-unused-vars
+  const [_productPhoto] = useState(null);
+  // eslint-disable-next-line no-unused-vars
+  const [_productDescription] = useState('');
 
   // Step 3: Generate
   const [generating, setGenerating] = useState(false);
@@ -162,7 +165,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
             setGenerating(false);
             clearInterval(interval);
           }
-        } catch (e) {
+        } catch (_) {
           console.error('Poll error:', e);
         }
       }, 2000);
@@ -179,7 +182,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
         const data = await res.json();
         setVoices(data.voices || []);
       }
-    } catch (e) {
+    } catch (_) {
       console.error('Voices fetch error:', e);
     }
   };
@@ -234,7 +237,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
       }
 
       setStep(1);
-    } catch (e) {
+    } catch (_) {
       setAnalyzeError(e.message);
     } finally {
       setAnalyzing(false);
@@ -298,7 +301,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
 
       const data = await res.json();
       setJobId(data.job_id);
-    } catch (e) {
+    } catch (_) {
       setGenStatus('failed');
       setGenLogs((prev) => [...prev, `Error: ${e.message}`]);
       setGenerating(false);
@@ -344,7 +347,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
 
       const data = await res.json();
       setJobId(data.job_id);
-    } catch (e) {
+    } catch (_) {
       setGenStatus('failed');
       setGenLogs((prev) => [...prev, `Retry error: ${e.message}`]);
       setGenerating(false);
@@ -1088,7 +1091,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
                           setActorGallery(galData.images || []);
                         }
                       }
-                    } catch (e) { console.error(e); }
+                    } catch (_) { console.error(e); }
                     finally { setGeneratingActors(false); }
                   }}
                   disabled={generatingActors || !falKey || !actorDescription}
@@ -1477,7 +1480,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
                                 throw new Error(err.detail || 'Failed');
                               }
                               setPublishResult({ ok: true, msg: isScheduling ? 'Scheduled!' : 'Published!' });
-                            } catch (e) {
+                            } catch (_) {
                               setPublishResult({ ok: false, msg: e.message });
                             } finally {
                               setPublishing(false);

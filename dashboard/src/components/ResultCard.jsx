@@ -124,7 +124,7 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 try {
                     const jsonErr = JSON.parse(errText);
                     throw new Error(jsonErr.detail || errText);
-                } catch (e) {
+                } catch (_) {
                     throw new Error(errText);
                 }
             }
@@ -137,7 +137,7 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 }
             }
 
-        } catch (e) {
+        } catch (_) {
             setEditError(e.message);
             setTimeout(() => setEditError(null), 5000);
         } finally {
@@ -192,7 +192,7 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 if (videoRef.current) videoRef.current.load();
                 setShowSubtitleModal(false);
             }
-        } catch (e) {
+        } catch (_) {
             setEditError(e.message);
             setTimeout(() => setEditError(null), 5000);
         } finally {
@@ -246,7 +246,7 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 if (videoRef.current) videoRef.current.load();
                 setShowHookModal(false);
             }
-        } catch (e) {
+        } catch (_) {
             setEditError(e.message);
             setTimeout(() => setEditError(null), 5000);
         } finally {
@@ -292,7 +292,7 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 try {
                     const jsonErr = JSON.parse(errText);
                     throw new Error(jsonErr.detail || errText);
-                } catch (e) {
+                } catch (_) {
                     if (e.message !== errText) throw e;
                     throw new Error(errText);
                 }
@@ -308,7 +308,7 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 setShowTranslateModal(false);
             }
 
-        } catch (e) {
+        } catch (_) {
             console.error('[Translate] Exception:', e);
             setEditError(e.message);
             setTimeout(() => setEditError(null), 5000);
@@ -366,7 +366,7 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 try {
                     const jsonErr = JSON.parse(errText);
                     throw new Error(jsonErr.detail || errText);
-                } catch (e) {
+                } catch (_) {
                     throw new Error(errText);
                 }
             }
@@ -377,7 +377,7 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 setPostResult(null);
             }, 3000);
 
-        } catch (e) {
+        } catch (_) {
             setPostResult({ success: false, msg: `Failed: ${e.message}` });
         } finally {
             setPosting(false);

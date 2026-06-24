@@ -25,7 +25,7 @@ const encrypt = (text) => {
       String.fromCharCode(c.charCodeAt(0) ^ SECRET_KEY.charCodeAt(i % SECRET_KEY.length))
     ).join('');
     return ENCRYPTION_PREFIX + btoa(xor);
-  } catch (e) {
+  } catch (_) {
     console.error("Encryption failed", e);
     return text;
   }
@@ -42,7 +42,7 @@ const decrypt = (text) => {
         String.fromCharCode(c.charCodeAt(0) ^ SECRET_KEY.charCodeAt(i % SECRET_KEY.length))
       ).join('');
       return result;
-    } catch (e) {
+    } catch (_) {
       // Fallback if decryption fails (might be old plain text)
       return '';
     }
@@ -890,7 +890,7 @@ function App() {
         setSessionRecovered(true);
         setTimeout(() => setSessionRecovered(false), 5000);
       }
-    } catch (e) {
+    } catch (_) {
       localStorage.removeItem(SESSION_KEY);
     }
   }, []);
@@ -911,7 +911,7 @@ function App() {
         timestamp: Date.now()
       };
       localStorage.setItem(SESSION_KEY, JSON.stringify(sessionData));
-    } catch (e) {
+    } catch (_) {
       // localStorage full or serialization error - ignore
     }
   }, [jobId, status, results, activeTab]);
@@ -989,7 +989,7 @@ function App() {
             // Update logs if available
             if (data.logs) setLogs(data.logs);
           }
-        } catch (e) {
+        } catch (_) {
           console.error("Polling error", e);
         }
       }, 2000);
@@ -1015,7 +1015,7 @@ function App() {
       } else {
         alert("No profiles found for this API Key.");
       }
-    } catch (e) {
+    } catch (_) {
       alert("Error fetching User Profiles. Please check key.");
       console.error(e);
     }
@@ -1062,7 +1062,7 @@ function App() {
       const resData = await res.json();
       setJobId(resData.job_id);
 
-    } catch (e) {
+    } catch (_) {
       setStatus('error');
       setLogs(l => [...l, `Error starting job: ${e.message}`]);
     }

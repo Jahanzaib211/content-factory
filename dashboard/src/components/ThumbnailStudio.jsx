@@ -30,7 +30,7 @@ function StepIndicator({ currentStep }) {
   );
 }
 
-function DragDropZone({ label, accept, onFile, file, onClear, icon: Icon }) {
+function DragDropZone({ label, accept, onFile, file, onClear, icon: _Icon }) {
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef(null);
 
@@ -156,7 +156,7 @@ export default function ThumbnailStudio({ geminiApiKey, minimaxApiKey, uploadPos
         setPreprocessSessionId(data.session_id);
         console.log(`🎙️ Background Whisper started: ${data.session_id}`);
       }
-    } catch (e) {
+    } catch (_) {
       console.error('Pre-upload failed:', e);
     } finally {
       setIsPreprocessing(false);
@@ -200,7 +200,7 @@ export default function ThumbnailStudio({ geminiApiKey, minimaxApiKey, uploadPos
         content: `Here are 10 viral title suggestions based on your video. Titles marked ⭐ are my top picks. Click one to select it, or tell me how to refine them.`
       }]);
       setStep(1);
-    } catch (e) {
+    } catch (_) {
       alert(`Analysis failed: ${e.message}`);
     } finally {
       setIsAnalyzing(false);
@@ -263,7 +263,7 @@ export default function ThumbnailStudio({ geminiApiKey, minimaxApiKey, uploadPos
         content: `Here are refined titles based on your feedback. Click one to select it.`
       }]);
       setTimeout(scrollToBottom, 100);
-    } catch (e) {
+    } catch (_) {
       setChatHistory(prev => [...prev, {
         role: 'assistant',
         content: `Failed to refine: ${e.message}`
@@ -307,7 +307,7 @@ export default function ThumbnailStudio({ geminiApiKey, minimaxApiKey, uploadPos
         throw new Error('No thumbnails were generated. Your Gemini API key may not have access to image generation.');
       }
       setGeneratedThumbnails(data.thumbnails);
-    } catch (e) {
+    } catch (_) {
       alert(`Generation failed: ${e.message}`);
     } finally {
       setIsGenerating(false);
@@ -326,7 +326,7 @@ export default function ThumbnailStudio({ geminiApiKey, minimaxApiKey, uploadPos
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(blobUrl);
-    } catch (e) {
+    } catch (_) {
       // Fallback: open in new tab if fetch fails
       window.open(getApiUrl(url), '_blank');
     }
@@ -357,7 +357,7 @@ export default function ThumbnailStudio({ geminiApiKey, minimaxApiKey, uploadPos
 
       const data = await res.json();
       setDescription(data.description || '');
-    } catch (e) {
+    } catch (_) {
       alert(`Description generation failed: ${e.message}`);
     } finally {
       setIsDescribing(false);
@@ -413,14 +413,14 @@ export default function ThumbnailStudio({ geminiApiKey, minimaxApiKey, uploadPos
               reject(new Error(statusData.error || 'Upload failed'));
             }
             // 'uploading' → keep polling
-          } catch (e) {
+          } catch (_) {
             clearInterval(interval);
             reject(e);
           }
         }, 2000);
       });
 
-    } catch (e) {
+    } catch (_) {
       setPublishResult({ success: false, error: e.message });
     } finally {
       setIsPublishing(false);
