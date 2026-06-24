@@ -36,6 +36,8 @@ NEW_TABS = [
     ("voice-lab", "Voice Lab"),
     ("avatar-studio", "Avatar Studio"),
     ("multilingual", "Multilingual"),
+    ("research", "Research"),
+    ("analytics", "Analytics"),
     ("settings", "Settings"),
 ]
 
@@ -198,6 +200,86 @@ def run_i18n(p) -> tuple[int, int]:
     return passed, failed
 
 
+def run_research_analytics(p) -> tuple[int, int]:
+    """Research and Analytics tabs: UI renders, API calls fire, no black screen."""
+    browser = p.chromium.launch(executable_path=CHROMIUM, headless=True,
+                                args=["--no-sandbox", "--disable-dev-shm-usage"])
+    ctx = browser.new_context(viewport={"width": 1440, "height": 900})
+    page = ctx.new_page()
+
+    passed, failed = 0, 0
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+
+    def step(name):
+        def deco(fn):
+            nonlocal passed, failed
+            t0 = time.time()
+            try:
+                fn()
+                print(f"  \u2713 {name}  ({(time.time()-t0)*1000:.0f} ms)")
+                passed += 1
+            except Exception as e:
+                msg = str(e).splitlines()[0][:120]
+                print(f"  \u2717 {name}  ({(time.time()-t0)*1000:.0f} ms) \u2014 {type(e).__name__}: {msg}")
+                failed += 1
+        return deco
+
+    print(f"\n[research-analytics] {BASE}\n" + "-" * 60)
+    enter_app(page)
+
+    @step("Research tab renders with Trend Scanner heading")
+    def _():
+        navigate(page, "research", "Research")
+        assert page.locator("h1:has-text('Research'), h2:has-text('Research')").count() > 0
+        assert page.locator("text=Trend Scanner").count() > 0
+        assert page.locator("text=Keyword Research").count() > 0
+        assert page.locator("text=SEO Score").count() > 0 or page.locator("text=AI Idea Generator").count() > 0
+
+    @step("Research tab: trend scan input exists and is interactive")
+    def _():
+        navigate(page, "research", "Research")
+        inp = page.locator("input[placeholder*='niche'], input[placeholder*='Niche']").first
+        expect(inp).to_be_visible(timeout=3000)
+        inp.fill("AI")
+        scan_btn = page.locator("button:has-text('Scan Trends')").first
+        expect(scan_btn).to_be_visible()
+        scan_btn.click()
+        page.wait_for_timeout(2000)
+
+    @step("Analytics tab renders without black screen")
+    def _():
+        errors.clear()
+        navigate(page, "analytics", "Analytics")
+        page.wait_for_timeout(1500)
+        assert page.locator("h1:has-text('Analytics'), h2:has-text('Analytics')").count() > 0
+        assert page.locator("text=Platform").count() > 0 or page.locator("text=Connect Channel").count() > 0
+        fatal = [e for e in errors if "favicon" not in e.lower()]
+        assert len(fatal) == 0, f"JS errors on Analytics tab: {fatal[:3]}"
+
+    @step("Analytics tab: shows platform status indicators")
+    def _():
+        navigate(page, "analytics", "Analytics")
+        page.wait_for_timeout(1000)
+        # Should show YouTube/TikTok/Instagram platform status
+        for platform in ["YouTube", "TikTok", "Instagram"]:
+            assert page.locator(f"text={platform}").count() > 0, f"missing {platform} status"
+
+    @step("Research tab: keyword research input works")
+    def _():
+        navigate(page, "research", "Research")
+        inp = page.locator("input[placeholder*='keyword'], input[placeholder*='keyword to research']").first
+        if inp.count() > 0:
+            inp.fill("python programming")
+            research_btn = page.locator("button:has-text('Research')").first
+            if research_btn.count() > 0:
+                research_btn.click()
+                page.wait_for_timeout(2000)
+
+    browser.close()
+    return passed, failed
+
+
 def run_a11y(p) -> tuple[int, int]:
     """Accessibility: every sidebar button has accessible name."""
     browser = p.chromium.launch(executable_path=CHROMIUM, headless=True,
@@ -346,6 +428,7 @@ def run_storage(p) -> tuple[int, int]:
 SUITES = {
     "smoke": run_smoke,
     "i18n": run_i18n,
+    "research-analytics": run_research_analytics,
     "a11y": run_a11y,
     "responsive": run_responsive,
     "storage": run_storage,

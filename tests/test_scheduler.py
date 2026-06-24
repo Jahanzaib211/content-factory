@@ -88,6 +88,18 @@ class TestRecurringScheduler:
         due = rs.get_due_schedules()
         assert isinstance(due, list)
 
+    def test_calculate_next_run(self):
+        rs = RecurringScheduler()
+        # Every day at 10:00
+        next_run = rs._calculate_next_run("0 10 * * *")
+        assert "T10:00:00" in next_run
+        # Mon/Wed/Fri at 9:00
+        next_run2 = rs._calculate_next_run("0 9 * * 1,3,5")
+        assert "T09:00:00" in next_run2
+        # Invalid cron (too few fields) returns a future time
+        next_run3 = rs._calculate_next_run("0 10")
+        assert next_run3.endswith("Z")
+
 
 class TestPlatformCropper:
     def test_init(self):

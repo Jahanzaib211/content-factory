@@ -314,8 +314,10 @@ async def run_ugc_ad(job: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def run_podcast_highlight(job: Dict[str, Any]) -> Dict[str, Any]:
-    """Download podcast → detect best moments → extract 3 highlight clips."""
+    """Download podcast → detect best moments via audio analysis → extract highlight clips."""
     inputs = job.get("inputs", {})
+    n_clips = min(5, max(1, inputs.get("num_clips", 3)))
+    clip_duration = inputs.get("clip_duration", 60)
     job_dir = _job_dir(job["job_id"])
     _append_log(job, "podcast-highlight: downloading source")
 
@@ -333,27 +335,84 @@ async def run_podcast_highlight(job: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         duration = 600.0
 
-    # Split into ~60s segments, take 3 best (first 3 as proxy for "best moments")
-    segment_dur = min(60.0, duration / 4)
-    n_clips = min(3, max(1, int(duration / segment_dur)))
+    # Step 1: Detect "best moments" using audio loudness analysis
+    # Split into analysis windows and measure volume to find exciting parts
+    window_dur = min(10.0, duration / 20)  # 10s analysis windows
+    n_windows = max(1, int(duration / window_dur))
 
-    for i in range(n_clips):
-        start = i * segment_dur
-        clip_path = os.path.join(job_dir, f"highlight_{i+1}.mp4")
-        _append_log(job, f"podcast-highlight: extracting clip {i+1} at {start:.0f}s")
+    _append_log(job, f"podcast-highlight: analyzing {n_windows} audio windows for highlights")
+    loudness_scores = []
+
+    for w in range(n_windows):
+        start = w * window_dur
+        # Measure RMS loudness for this window
+        af_cmd = [
+            "ffmpeg", "-ss", str(start), "-t", str(window_dur),
+            "-i", source_path,
+            "-af", f"astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=/dev/stdout",
+            "-f", "null", "-",
+        ]
+        try:
+            result = subprocess.run(af_cmd, capture_output=True, text=True, timeout=30)
+            # Parse RMS level from output
+            import re
+            rms_matches = re.findall(r"RMS_level=(-?\d+\.?\d*)", result.stderr + result.stdout)
+            if rms_matches:
+                avg_rms = sum(float(x) for x in rms_matches) / len(rms_matches)
+                # Convert to positive score (higher = louder = more exciting)
+                score = max(0, 100 + avg_rms)  # RMS is typically -60 to 0 dB
+            else:
+                score = 50  # neutral if parsing fails
+        except Exception:
+            score = 50
+        loudness_scores.append({"window": w, "start": start, "score": score})
+
+    # Step 2: Find top N peaks (non-overlapping) as highlight moments
+    loudness_scores.sort(key=lambda x: x["score"], reverse=True)
+    selected = []
+    for candidate in loudness_scores:
+        if len(selected) >= n_clips:
+            break
+        # Check no overlap with already selected
+        overlaps = False
+        for s in selected:
+            if abs(candidate["start"] - s["start"]) < clip_duration:
+                overlaps = True
+                break
+        if not overlaps:
+            selected.append(candidate)
+    selected.sort(key=lambda x: x["start"])  # chronological order
+
+    # Fallback: if detection found nothing, evenly space clips
+    if not selected:
+        step = duration / (n_clips + 1)
+        selected = [{"window": i, "start": step * (i + 1), "score": 50} for i in range(n_clips)]
+
+    # Step 3: Extract clips at detected highlight moments
+    for rank, moment in enumerate(selected):
+        start = max(0, min(moment["start"], duration - clip_duration))
+        clip_path = os.path.join(job_dir, f"highlight_{rank+1}.mp4")
+        _append_log(job, f"podcast-highlight: extracting clip {rank+1} at {start:.0f}s (score: {moment['score']:.0f})")
         try:
             _run_ffmpeg([
                 "-i", source_path,
                 "-ss", str(start),
-                "-t", str(segment_dur),
+                "-t", str(clip_duration),
                 "-c:v", "libx264", "-preset", "fast", "-crf", "23",
                 "-c:a", "aac", "-b:a", "128k",
                 clip_path,
-            ], f"podcast clip {i+1}")
-            outputs.append({"name": os.path.basename(clip_path), "path": clip_path, "rank": i + 1, "size": os.path.getsize(clip_path)})
+            ], f"podcast clip {rank+1}")
+            outputs.append({
+                "name": os.path.basename(clip_path),
+                "path": clip_path,
+                "rank": rank + 1,
+                "start_time": round(start, 1),
+                "loudness_score": round(moment["score"], 1),
+                "size": os.path.getsize(clip_path),
+            })
         except Exception as e:
-            _append_log(job, f"podcast clip {i+1} failed: {e}")
-            outputs.append({"name": os.path.basename(clip_path), "path": clip_path, "rank": i + 1, "error": str(e)})
+            _append_log(job, f"podcast clip {rank+1} failed: {e}")
+            outputs.append({"name": os.path.basename(clip_path), "path": clip_path, "rank": rank + 1, "error": str(e)})
 
     return {"outputs": outputs, "cost_estimate": {"total": 0.0}, "logs_count": len(job.get("logs", []))}
 

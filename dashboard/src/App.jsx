@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, FileVideo, Sparkles, Youtube, Instagram, Share2, LogOut, ChevronDown, Check, Activity, LayoutDashboard, Settings, PlusCircle, History, Menu, X, Terminal, Shield, LayoutGrid, Image, Globe, RotateCcw, Calendar, AlertTriangle, KeyRound, Bot, Users, Smartphone, ExternalLink, Copy, CheckCircle2, Mic, UserCircle, Languages, Layers, Trash2, Play, Pause, Volume2, Send, Type, FileText, Sparkle, Headphones, Mic2, Wand2, Loader2, Square, CheckCircle, RefreshCw, Plus, ChevronRight, Monitor, Zap } from 'lucide-react';
+import { Upload, FileVideo, Sparkles, Youtube, Instagram, Share2, LogOut, ChevronDown, Check, Activity, LayoutDashboard, Settings, PlusCircle, History, Menu, X, Terminal, Shield, LayoutGrid, Image, Globe, RotateCcw, Calendar, AlertTriangle, KeyRound, Bot, Users, Smartphone, ExternalLink, Copy, CheckCircle2, Mic, UserCircle, Languages, Layers, Trash2, Play, Pause, Volume2, Send, Type, FileText, Sparkle, Headphones, Mic2, Wand2, Loader2, Square, CheckCircle, RefreshCw, Plus, ChevronRight, Monitor, Zap, TrendingUp, BarChart3 } from 'lucide-react';
 import KeyInput, { MiniMaxKeyInput } from './components/KeyInput';
 import MediaInput from './components/MediaInput';
 import ResultCard from './components/ResultCard';
@@ -26,7 +26,7 @@ const encrypt = (text) => {
       String.fromCharCode(c.charCodeAt(0) ^ SECRET_KEY.charCodeAt(i % SECRET_KEY.length))
     ).join('');
     return ENCRYPTION_PREFIX + btoa(xor);
-  } catch (_) {
+  } catch (e) {
     console.error("Encryption failed", e);
     return text;
   }
@@ -563,7 +563,6 @@ function ResearchPanel() {
   const [seoResult, setSeoResult] = useState(null);
   const [ideas, setIdeas] = useState([]);
   const [loading, setLoading] = useState('');
-  const getApiUrl = (path) => { const base = (typeof window !== 'undefined' && window.__vite_base_url) || ''; return base + path; };
 
   const fetchTrends = async () => {
     setLoading('trends');
@@ -732,7 +731,6 @@ function AnalyticsPanel() {
   const [platform, setPlatform] = useState('youtube');
   const [channelId, setChannelId] = useState('');
   const [loading, setLoading] = useState('');
-  const getApiUrl = (path) => { const base = (typeof window !== 'undefined' && window.__vite_base_url) || ''; return base + path; };
 
   useEffect(() => {
     fetch(getApiUrl('/api/analytics/dashboard')).then(r => r.json()).then(setData).catch(() => {});
@@ -1309,7 +1307,7 @@ function App() {
             // Update logs if available
             if (data.logs) setLogs(data.logs);
           }
-        } catch (_) {
+        } catch (e) {
           console.error("Polling error", e);
         }
       }, 2000);
@@ -1335,7 +1333,7 @@ function App() {
       } else {
         alert("No profiles found for this API Key.");
       }
-    } catch (_) {
+    } catch (e) {
       alert("Error fetching User Profiles. Please check key.");
       console.error(e);
     }
@@ -1382,7 +1380,7 @@ function App() {
       const resData = await res.json();
       setJobId(resData.job_id);
 
-    } catch (_) {
+    } catch (e) {
       setStatus('error');
       setLogs(l => [...l, `Error starting job: ${e.message}`]);
     }

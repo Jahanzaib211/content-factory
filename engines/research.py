@@ -140,22 +140,44 @@ class TrendScanner:
         return await loop.run_in_executor(None, _fetch)
 
     async def _get_trends_http(self, niche: str) -> List[TrendTopic]:
-        """Fallback: use Google Trends RSS/HTML scraping."""
+        """Fallback: scrape Google Trends trending searches page."""
         topics = []
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                # Use Google Trends explore page
-                url = f"https://trends.google.com/trends/explore?q={niche or 'youtube'}&date=today 1-month"
-                r = await client.get(url, follow_redirects=True)
+                # Try trending searches page (daily trends)
+                r = await client.get(
+                    "https://trends.google.com/trends/trendingsearches/daily",
+                    params={"geo": "US"},
+                    follow_redirects=True,
+                )
                 if r.status_code == 200:
-                    # Parse trending searches from the page
-                    # This is a simplified fallback — pytrends is preferred
-                    topics.append(TrendTopic(
-                        title=niche or "trending",
-                        traffic_level="stable",
-                        search_volume=1000,
-                        source="google_trends_fallback",
-                    ))
+                    # Parse title keywords from the HTML
+                    import re
+                    # Google Trends daily trends page has <div class="mZ3RIc"> for titles
+                    titles = re.findall(r'class="mZ3RIc"[^>]*>([^<]+)<', r.text)
+                    for title in titles[:10]:
+                        topics.append(TrendTopic(
+                            title=title.strip(),
+                            traffic_level="rising",
+                            search_volume=5000,  # estimated from trending status
+                            source="google_trends_fallback",
+                        ))
+                    if not topics:
+                        # Try alternative parsing: look for search terms in JSON
+                        json_match = re.search(r'window.__INITIAL_STATE__\s*=\s*({.*?});', r.text)
+                        if json_match:
+                            import json
+                            try:
+                                state = json.loads(json_match.group(1))
+                                for item in state.get("dailyTrends", {}).get("trendCards", [])[:10]:
+                                    topics.append(TrendTopic(
+                                        title=item.get("title", ""),
+                                        traffic_level="rising",
+                                        search_volume=item.get("searchVolume", 5000),
+                                        source="google_trends_fallback",
+                                    ))
+                            except (json.JSONDecodeError, KeyError):
+                                pass
         except Exception as e:
             log.warning(f"Trend HTTP fallback failed: {e}")
         return topics
@@ -213,18 +235,21 @@ class KeywordResearch:
         topics = await self._trends.get_trending_topics(keyword)
         trend_volume = topics[0].search_volume if topics else 0
 
-        # Estimate competition from keyword characteristics
-        competition = self._estimate_competition(keyword)
+        # Get related keywords via Google Suggestions (counts as competition signal)
+        related = await self._get_google_suggestions(keyword)
+
+        # Estimate competition from keyword length + suggestion count
+        competition = self._estimate_competition(keyword, len(related))
+
+        # Estimate volume from trends data + keyword characteristics
+        volume = trend_volume if trend_volume > 0 else self._estimate_volume(keyword, len(related))
 
         # Calculate opportunity score
-        score = self._calculate_score(trend_volume, competition)
-
-        # Get related keywords via Google Suggestions
-        related = await self._get_google_suggestions(keyword)
+        score = self._calculate_score(volume, competition)
 
         return KeywordResult(
             keyword=keyword,
-            search_volume=trend_volume or self._estimate_volume(keyword),
+            search_volume=volume,
             competition=competition,
             score=score,
             related_keywords=related,
@@ -236,30 +261,48 @@ class KeywordResearch:
         tasks = [self.research_keyword(kw) for kw in keywords]
         return await asyncio.gather(*tasks, return_exceptions=False)
 
-    def _estimate_competition(self, keyword: str) -> float:
-        """Estimate competition from keyword characteristics."""
-        # Single word = high competition, long tail = low
-        words = keyword.split()
-        if len(words) == 1:
-            return 0.9
-        elif len(words) == 2:
-            return 0.7
-        elif len(words) == 3:
-            return 0.5
-        else:
-            return 0.3
+    def _estimate_competition(self, keyword: str, suggestion_count: int = 0) -> float:
+        """Estimate competition from keyword characteristics + suggestion count.
 
-    def _estimate_volume(self, keyword: str) -> int:
-        """Rough volume estimate based on keyword length."""
+        More Google autocomplete suggestions = more competition (people are searching).
+        Longer keywords = less competition (long-tail).
+        """
+        # Base competition from keyword length
         words = keyword.split()
         if len(words) == 1:
-            return 100000
+            base = 0.85
         elif len(words) == 2:
-            return 50000
+            base = 0.65
         elif len(words) == 3:
-            return 10000
+            base = 0.45
         else:
-            return 5000
+            base = 0.25
+
+        # Adjust based on suggestion count (more suggestions = more competition)
+        # 0 suggestions = low comp, 8 suggestions = high comp
+        suggestion_boost = min(0.15, suggestion_count * 0.02)
+
+        return min(0.95, base + suggestion_boost)
+
+    def _estimate_volume(self, keyword: str, suggestion_count: int = 0) -> int:
+        """Estimate volume from keyword length + suggestion count.
+
+        More suggestions = higher search volume.
+        Shorter keywords = higher volume.
+        """
+        words = keyword.split()
+        if len(words) == 1:
+            base = 100000
+        elif len(words) == 2:
+            base = 50000
+        elif len(words) == 3:
+            base = 15000
+        else:
+            base = 5000
+
+        # Boost from suggestion count (more suggestions = more searches)
+        volume_boost = suggestion_count * 2000
+        return base + volume_boost
 
     def _calculate_score(self, volume: int, competition: float) -> float:
         """Calculate 0-100 opportunity score. High volume + low competition = high score."""
@@ -454,22 +497,29 @@ Return ONLY the JSON array, no other text."""
             return self._fallback_ideas(niche, count)
 
     def _fallback_ideas(self, niche: str, count: int) -> List[VideoIdea]:
-        """Fallback ideas when LLM is unavailable."""
+        """Fallback ideas when LLM is unavailable. Uses niche-specific templates."""
+        import random
         templates = [
-            {"title": f"10 {niche} Tips Nobody Tells You", "hook": f"Here's what most people get wrong about {niche}", "estimated_views": "high"},
-            {"title": f"I Tried {niche} for 30 Days — Here's What Happened", "hook": f"I spent 30 days nonstop on {niche}", "estimated_views": "viral"},
-            {"title": f"The Truth About {niche} Nobody Wants to Hear", "hook": f"Everyone lies about {niche}", "estimated_views": "high"},
-            {"title": f"{niche} in 2026: What's Changed", "hook": f"{niche} looks completely different now", "estimated_views": "medium"},
-            {"title": f"Why {niche} is Dead (And What's Next)", "hook": f"{niche} as we know it is over", "estimated_views": "viral"},
+            {"title": f"10 {niche} Tips Nobody Tells You", "hook": f"Here's what most people get wrong about {niche}", "estimated_views": "high", "tags": [niche, "tips", "tutorial", "2026", "guide"]},
+            {"title": f"I Tried {niche} for 30 Days — Here's What Happened", "hook": f"I spent 30 days nonstop on {niche}", "estimated_views": "viral", "tags": [niche, "challenge", "30days", "experiment", "results"]},
+            {"title": f"The Truth About {niche} Nobody Wants to Hear", "hook": f"Everyone lies about {niche}", "estimated_views": "high", "tags": [niche, "truth", "myths", "debunked", "reality"]},
+            {"title": f"{niche} in 2026: What's Changed", "hook": f"{niche} looks completely different now", "estimated_views": "medium", "tags": [niche, "2026", "update", "trends", "changes"]},
+            {"title": f"Why {niche} is Dead (And What's Next)", "hook": f"{niche} as we know it is over", "estimated_views": "viral", "tags": [niche, "future", "prediction", "dead", "next"]},
+            {"title": f"The {niche} Starter Kit for Complete Beginners", "hook": f"Everything you need to start with {niche}", "estimated_views": "medium", "tags": [niche, "beginner", "starter", "basics", "入门"]},
+            {"title": f"How I Made $10K with {niche}", "hook": f"This {niche} strategy changed everything", "estimated_views": "viral", "tags": [niche, "money", "income", "strategy", "success"]},
+            {"title": f"{niche} vs. The Competition: Which is Better?", "hook": f"I tested every {niche} option so you don't have to", "estimated_views": "high", "tags": [niche, "comparison", "review", "versus", "best"]},
+            {"title": f"The Biggest {niche} Mistakes (And How to Fix Them)", "hook": f"Stop making these {niche} mistakes today", "estimated_views": "high", "tags": [niche, "mistakes", "fix", "improve", "common"]},
+            {"title": f"{niche}: The Ultimate Guide for 2026", "hook": f"This is everything I wish I knew about {niche}", "estimated_views": "high", "tags": [niche, "guide", "ultimate", "2026", "comprehensive"]},
         ]
+        random.shuffle(templates)
         return [
             VideoIdea(
                 title=t["title"],
                 hook=t["hook"],
-                description=f"A comprehensive video about {t['title'].lower()}",
-                tags=[niche, "youtube", "tutorial", "tips", "2026"],
+                description=f"A comprehensive video about {t['title'].lower()}. Perfect for {niche} enthusiasts looking to level up.",
+                tags=t["tags"],
                 estimated_views=t["estimated_views"],
-                score=50,
+                score=random.randint(40, 65),
             )
             for t in templates[:count]
         ]

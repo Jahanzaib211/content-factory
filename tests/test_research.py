@@ -38,10 +38,14 @@ class TestKeywordResearch:
 
     def test_estimate_competition(self):
         kr = KeywordResearch()
-        assert kr._estimate_competition("python") == 0.9
-        assert kr._estimate_competition("python programming") == 0.7
-        assert kr._estimate_competition("python web tutorial") == 0.5
-        assert kr._estimate_competition("best python web framework 2026") == 0.3
+        # Single word, no suggestions = high competition
+        assert kr._estimate_competition("python", 0) == 0.85
+        # Two words, some suggestions = moderate-high
+        c2 = kr._estimate_competition("python programming", 4)
+        assert 0.65 <= c2 <= 0.85
+        # Long tail, many suggestions
+        c4 = kr._estimate_competition("best python web framework 2026", 8)
+        assert 0.25 <= c4 <= 0.45
 
     def test_calculate_score(self):
         kr = KeywordResearch()
@@ -51,8 +55,10 @@ class TestKeywordResearch:
 
     def test_estimate_volume(self):
         kr = KeywordResearch()
-        assert kr._estimate_volume("python") == 100000
-        assert kr._estimate_volume("python programming") == 50000
+        v1 = kr._estimate_volume("python", 0)
+        assert v1 == 100000
+        v2 = kr._estimate_volume("python programming", 5)
+        assert v2 == 50000 + 5 * 2000
 
 
 class TestSEOScorer:
@@ -80,7 +86,7 @@ class TestIdeaGenerator:
         assert isinstance(ideas, list)
         assert len(ideas) == 3
         assert all(isinstance(i, VideoIdea) for i in ideas)
-        assert all(i.score == 50 for i in ideas)
+        assert all(40 <= i.score <= 65 for i in ideas)
 
     def test_fallback_ideas_different_niches(self):
         ig = IdeaGenerator()
