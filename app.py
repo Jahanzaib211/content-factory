@@ -3096,3 +3096,181 @@ async def saasshorts_voices(
         ],
         "source": "defaults",
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# RESEARCH ENDPOINTS — trend scanning, keyword research, SEO scoring
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/research/trends")
+async def research_trends(niche: str = "", timeframe: str = "today 1-month", geo: str = ""):
+    """Get trending topics for a niche via Google Trends."""
+    from engines.research import TrendScanner
+    scanner = TrendScanner()
+    topics = await scanner.get_trending_topics(niche, timeframe, geo)
+    return {"trends": [{"title": t.title, "traffic_level": t.traffic_level, "search_volume": t.search_volume, "source": t.source, "score": t.score} for t in topics]}
+
+
+@app.get("/api/research/keywords")
+async def research_keywords(q: str = ""):
+    """Keyword research: search volume, competition, opportunity score."""
+    if not q:
+        raise HTTPException(400, "q parameter required")
+    from engines.research import KeywordResearch
+    kr = KeywordResearch()
+    result = await kr.research_keyword(q)
+    return {
+        "keyword": result.keyword,
+        "search_volume": result.search_volume,
+        "competition": result.competition,
+        "score": result.score,
+        "trend_direction": result.trend_direction,
+        "related_keywords": result.related_keywords,
+    }
+
+
+@app.get("/api/research/score")
+async def research_score(topic: str = ""):
+    """SEO score a topic 0-100 with breakdown."""
+    if not topic:
+        raise HTTPException(400, "topic parameter required")
+    from engines.research import SEOScorer
+    scorer = SEOScorer()
+    return await scorer.score_topic(topic)
+
+
+@app.post("/api/research/ideas")
+async def research_ideas(body: Dict[str, Any] = {}):
+    """Generate AI video ideas from trends + niche."""
+    from engines.research import IdeaGenerator
+    gen = IdeaGenerator()
+    ideas = await gen.generate_ideas(
+        niche=body.get("niche", ""),
+        channel_description=body.get("channel_description", ""),
+        count=body.get("count", 5),
+    )
+    return {"ideas": [{"title": i.title, "hook": i.hook, "description": i.description, "tags": i.tags, "estimated_views": i.estimated_views, "score": i.score, "source_trend": i.source_trend} for i in ideas]}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# ANALYTICS ENDPOINTS — performance tracking across platforms
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/analytics/dashboard")
+async def analytics_dashboard():
+    """Get aggregated analytics for the dashboard."""
+    from engines.analytics import AnalyticsEngine
+    engine = AnalyticsEngine()
+    return engine.get_dashboard_data()
+
+
+@app.get("/api/analytics/video/{platform}/{video_id}")
+async def analytics_video(platform: str, video_id: str):
+    """Fetch metrics for a single video."""
+    from engines.analytics import AnalyticsEngine
+    engine = AnalyticsEngine()
+    video_ids = {platform: video_id}
+    results = await engine.fetch_all_metrics(video_ids)
+    if results:
+        from dataclasses import asdict
+        return asdict(results[0])
+    raise HTTPException(404, "No metrics found. Check platform/video_id or ensure API keys are set.")
+
+
+@app.get("/api/analytics/channel/{platform}")
+async def analytics_channel(platform: str, channel_id: str = ""):
+    """Fetch channel-level metrics."""
+    from engines.analytics import YouTubeAnalytics, AnalyticsStore
+    if platform == "youtube" and channel_id:
+        yt = YouTubeAnalytics()
+        metrics = await yt.get_channel_metrics(channel_id)
+        if metrics:
+            from dataclasses import asdict
+            store = AnalyticsStore()
+            store.store_channel_metrics(metrics)
+            return asdict(metrics)
+    # Fallback: return stored data
+    store = AnalyticsStore()
+    return {"channels": store.get_channel_metrics(platform)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# SCHEDULER ENDPOINTS — smart scheduling, recurring, platform cropping
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/scheduler/best-times")
+async def scheduler_best_times(platform: str = "youtube", count: int = 5, timezone: str = "UTC"):
+    """Get best posting times for a platform."""
+    from engines.scheduler import TimeOptimizer
+    opt = TimeOptimizer()
+    slots = await opt.get_best_times(platform, count, timezone)
+    return {"times": [{"platform": s.platform, "day": s.day_of_week, "hour": s.hour, "timezone": s.timezone, "confidence": s.confidence, "reason": s.reason} for s in slots]}
+
+
+@app.post("/api/scheduler/recurring")
+async def scheduler_create_recurring(body: Dict[str, Any] = {}):
+    """Create a recurring schedule."""
+    from engines.scheduler import RecurringScheduler
+    sched = RecurringScheduler()
+    schedule = sched.create_schedule(
+        template_id=body.get("template_id", ""),
+        inputs=body.get("inputs", {}),
+        platforms=body.get("platforms", ["youtube"]),
+        cron_expression=body.get("cron_expression", "0 9 * * 1,3,5"),
+        timezone=body.get("timezone", "UTC"),
+    )
+    from dataclasses import asdict
+    return asdict(schedule)
+
+
+@app.get("/api/scheduler/recurring")
+async def scheduler_list_recurring():
+    """List all recurring schedules."""
+    from engines.scheduler import RecurringScheduler
+    sched = RecurringScheduler()
+    from dataclasses import asdict
+    return {"schedules": [asdict(s) for s in sched.list_schedules()]}
+
+
+@app.delete("/api/scheduler/recurring/{schedule_id}")
+async def scheduler_delete_recurring(schedule_id: str):
+    """Delete a recurring schedule."""
+    from engines.scheduler import RecurringScheduler
+    sched = RecurringScheduler()
+    ok = sched.delete_schedule(schedule_id)
+    if not ok:
+        raise HTTPException(404, "Schedule not found")
+    return {"deleted": True}
+
+
+@app.post("/api/scheduler/crop")
+async def scheduler_crop(body: Dict[str, Any] = {}):
+    """Crop video for a specific platform."""
+    video_path = body.get("video_path", "")
+    platform = body.get("platform", "tiktok")
+    if not video_path or not os.path.exists(video_path):
+        raise HTTPException(400, "video_path required and must exist")
+    from engines.scheduler import PlatformCropper
+    cropper = PlatformCropper()
+    output_dir = os.path.join("output", "cropped", os.path.splitext(os.path.basename(video_path))[0])
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f"{platform}.mp4")
+    try:
+        cropper.crop_for_platform(video_path, platform, output_path)
+        return {"output_path": output_path, "platform": platform, "size": os.path.getsize(output_path)}
+    except Exception as e:
+        raise HTTPException(500, f"Crop failed: {e}")
+
+
+@app.post("/api/scheduler/crop-all")
+async def scheduler_crop_all(body: Dict[str, Any] = {}):
+    """Crop video for all platforms at once."""
+    video_path = body.get("video_path", "")
+    if not video_path or not os.path.exists(video_path):
+        raise HTTPException(400, "video_path required and must exist")
+    from engines.scheduler import PlatformCropper
+    cropper = PlatformCropper()
+    output_dir = os.path.join("output", "cropped", os.path.splitext(os.path.basename(video_path))[0])
+    os.makedirs(output_dir, exist_ok=True)
+    results = cropper.crop_for_all_platforms(video_path, output_dir)
+    return {"results": results, "output_dir": output_dir}

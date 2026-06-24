@@ -17,6 +17,7 @@ Each engine exposes:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -260,12 +261,71 @@ class TikTokEngine(BaseEngine):
             raise EngineError("TikTok not connected. Click 'Connect TikTok' in Settings.")
         if not os.path.exists(video_path):
             raise EngineError(f"video not found: {video_path}")
-        # TikTok requires: 1) init upload, 2) upload chunks, 3) publish
-        # Simplified here — see TikTok docs for the full protocol.
-        raise EngineError(
-            "TikTok upload protocol not yet implemented in this build. "
-            "Use Upload-Post (legacy) or complete the TikTok init/upload/publish flow."
-        )
+        # TikTok Content Posting API v2:
+        # 1) POST /v2/post/publish/video/init/ to get upload URL
+        # 2) PUT the video file to the upload URL
+        # 3) Poll for completion then publish
+        access_token = tokens["access_token"]
+
+        # Step 1: Initialize upload
+        import httpx
+        file_size = os.path.getsize(video_path)
+        init_payload = {
+            "post_info": {
+                "title": title[:150],
+                "privacy_level": privacy,
+                "disable_duet": False,
+                "disable_comment": False,
+                "disable_stitch": False,
+            },
+            "source_info": {
+                "source": "FILE_UPLOAD",
+                "video_size": file_size,
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            init_r = await client.post(
+                "https://open.tiktokapis.com/v2/post/publish/video/init/",
+                headers={"Authorization": f"Bearer {access_token}"},
+                json=init_payload,
+            )
+            init_r.raise_for_status()
+            init_data = init_r.json().get("data", {})
+            upload_url = init_data.get("upload_url")
+            publish_id = init_data.get("publish_id")
+
+            if not upload_url:
+                raise EngineError(f"TikTok init failed: {init_r.text[:200]}")
+
+            # Step 2: Upload the video file
+            with open(video_path, "rb") as f:
+                upload_r = await client.put(
+                    upload_url,
+                    content=f.read(),
+                    headers={
+                        "Content-Type": "video/mp4",
+                        "Content-Range": f"bytes 0-{file_size - 1}/{file_size}",
+                    },
+                )
+                upload_r.raise_for_status()
+
+            # Step 3: Poll for processing completion (max 60s)
+            for _ in range(12):
+                await asyncio.sleep(5)
+                status_r = await client.get(
+                    "https://open.tiktokapis.com/v2/post/publish/status/fetch/",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    json={"publish_id": publish_id},
+                )
+                status_data = status_r.json().get("data", {})
+                status = status_data.get("status")
+                if status == "SUCCESS":
+                    return {"status": "published", "platform": "tiktok", "publish_id": publish_id}
+                elif status == "FAILED":
+                    raise EngineError(f"TikTok publish failed: {status_data}")
+
+            return {"status": "processing", "platform": "tiktok", "publish_id": publish_id}
 
     @engine_method
     def status(self) -> Dict[str, Any]:
@@ -353,11 +413,84 @@ class InstagramEngine(BaseEngine):
             raise EngineError("Instagram not connected. Click 'Connect Instagram' in Settings.")
         if not os.path.exists(video_path):
             raise EngineError(f"video not found: {video_path}")
-        # Instagram requires: 1) POST /media (container), 2) poll until ready, 3) POST /media_publish
-        raise EngineError(
-            "Instagram upload protocol not yet implemented in this build. "
-            "Use Upload-Post (legacy) or complete the IG container/publish flow."
-        )
+        # Instagram Graph API requires a publicly accessible video URL.
+        # Strategy: upload to S3/SeaweedFS first, then create IG container.
+        ig_user_id = tokens.get("ig_user_id", "")
+        access_token = tokens.get("access_token", "")
+
+        if not ig_user_id:
+            raise EngineError("Instagram: ig_user_id not found in tokens. Reconnect Instagram.")
+
+        import httpx
+
+        # Step 0: Get a public URL for the video
+        public_url = await self._get_public_url(video_path)
+
+        # Step 1: Create media container
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            create_r = await client.post(
+                f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
+                data={
+                    "media_type": "REELS",
+                    "video_url": public_url,
+                    "caption": f"{title}\n\n{description}"[:2200],
+                    "access_token": access_token,
+                },
+            )
+            create_r.raise_for_status()
+            container_id = create_r.json().get("id")
+            if not container_id:
+                raise EngineError(f"Instagram container creation failed: {create_r.text[:300]}")
+
+            # Step 2: Poll until status is FINISHED (max 120s)
+            for _ in range(24):
+                await asyncio.sleep(5)
+                status_r = await client.get(
+                    f"https://graph.facebook.com/v19.0/{container_id}",
+                    params={"fields": "status_code", "access_token": access_token},
+                )
+                status_data = status_r.json()
+                status_code = status_data.get("status_code")
+                if status_code == "FINISHED":
+                    break
+                elif status_code == "ERROR":
+                    raise EngineError(f"Instagram container processing failed: {status_data}")
+
+            # Step 3: Publish
+            publish_r = await client.post(
+                f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish",
+                data={
+                    "creation_id": container_id,
+                    "access_token": access_token,
+                },
+            )
+            publish_r.raise_for_status()
+            media_id = publish_r.json().get("id")
+
+            return {
+                "status": "published",
+                "platform": "instagram",
+                "media_id": media_id,
+                "url": f"https://instagram.com/reel/{media_id}",
+            }
+
+    async def _get_public_url(self, video_path: str) -> str:
+        """Upload video to storage and return a public URL."""
+        # Try S3/SeaweedFS first
+        try:
+            from engines.storage import get_storage
+            storage = get_storage()
+            key = f"social/instagram/{os.path.basename(video_path)}"
+            with open(video_path, "rb") as f:
+                result = storage.upload(f, key)
+            return result.get("url", "")
+        except Exception:
+            pass
+
+        # Fallback: use the backend's public URL
+        public_base = os.getenv("PUBLIC_BASE_URL", "http://localhost:18080")
+        filename = os.path.basename(video_path)
+        return f"{public_base}/output/{filename}"
 
     @engine_method
     def status(self) -> Dict[str, Any]:
