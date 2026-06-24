@@ -1106,7 +1106,11 @@ async def social_post_video(
 
 @app.post("/api/observability/langfuse/event")
 async def langfuse_event_proxy(payload: dict):
-    """Proxy a Langfuse event from the frontend (or test). No-op stub for now."""
+    """Proxy a Langfuse event from the frontend to the configured Langfuse host.
+
+    Requires LANGFUSE_HOST, LANGFUSE_PUBLIC_KEY, and LANGFUSE_SECRET_KEY env vars.
+    Returns proxied=False when env vars are not set (graceful degradation).
+    """
     # Real wiring: forward to LANGFUSE_HOST via httpx.
     # See https://langfuse.com/docs for ingestion endpoint.
     host = os.getenv("LANGFUSE_HOST", "")

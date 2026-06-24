@@ -47,32 +47,82 @@ def create_app():  # pragma: no cover - optional FastAPI server
     def tts(req: TTSReq):
         if not os.path.isdir(MODEL_DIR):
             raise HTTPException(503, f"CosyVoice model not found at {MODEL_DIR}")
-        # Real implementation:
-        #   from cosyvoice.cli.cosyvoice import CosyVoice2
-        #   cv = CosyVoice2(MODEL_DIR, load_jit=False, load_trt=False, fp16=True)
-        #   results = list(cv.inference_sft(req.text, "English_Graceful_Lady"))
-        #   ... save audio ...
-        # Stub:
-        out = f"/tmp/cosyvoice_{uuid.uuid4().hex[:8]}.wav"
-        with open(out, "wb") as f:
-            f.write(b"\x00" * 1024)  # 1KB silent stub
-        return {"audio_path": out, "duration_ms": 1000.0, "model": MODEL_DIR}
+        try:
+            from cosyvoice.cli.cosyvoice import CosyVoice2
+            import torchaudio
+
+            cv = CosyVoice2(MODEL_DIR, load_jit=False, load_trt=False, fp16=True)
+
+            # Select speaker preset or use default
+            speaker = req.voice_id or "English_Graceful_Lady"
+            if req.language and req.language != "auto":
+                speaker = f"{req.language}_{speaker.split('_')[-1]}" if '_' in speaker else speaker
+
+            results = list(cv.inference_sft(req.text, speaker, speed=req.speed))
+            if not results:
+                raise HTTPException(500, "CosyVoice returned empty results")
+
+            # Save the first result
+            out = f"/tmp/cosyvoice_{uuid.uuid4().hex[:8]}.wav"
+            torchaudio.save(out, results[0]["tts_speech"], 22050)
+            duration_ms = results[0]["tts_speech"].shape[1] / 22050 * 1000
+            return {"audio_path": out, "duration_ms": duration_ms, "model": MODEL_DIR}
+        except ImportError as e:
+            raise HTTPException(503, f"CosyVoice dependencies not installed: {e}")
+        except Exception as e:
+            log.exception(f"[cosyvoice] TTS failed: {e}")
+            raise HTTPException(500, f"TTS generation failed: {e}")
 
     @app.post("/clone")
     async def clone(name: str = Form(...), file: UploadFile = File(...)):
         if not os.path.isdir(MODEL_DIR):
             raise HTTPException(503, f"CosyVoice model not found at {MODEL_DIR}")
-        # Save upload, run clone, register voice
-        voice_id = name.lower().replace(" ", "_")
-        _VOICES[voice_id] = {
-            "voice_id": voice_id,
-            "name": name,
-            "language": "multilingual",
-            "gender": "neutral",
-            "style": "cloned",
-            "created_at": time.time(),
-        }
-        return {"voice_id": voice_id, "name": name, "model": MODEL_DIR}
+        try:
+            from cosyvoice.cli.cosyvoice import CosyVoice2
+            import torchaudio
+
+            # Save uploaded audio
+            upload_path = f"/tmp/cosyvoice_clone_{uuid.uuid4().hex[:8]}.wav"
+            content = await file.read()
+            with open(upload_path, "wb") as f:
+                f.write(content)
+
+            cv = CosyVoice2(MODEL_DIR, load_jit=False, load_trt=False, fp16=True)
+
+            # Load reference audio
+            speech, sr = torchaudio.load(upload_path)
+            if sr != 16000:
+                speech = torchaudio.functional.resample(speech, sr, 16000)
+
+            # Run zero-shot voice cloning
+            results = list(cv.inference_zero_shot(
+                req.text if hasattr(req, 'text') else "Hello, this is a test.",
+                speech,
+                name,
+                language="auto",
+            ))
+            if not results:
+                raise HTTPException(500, "Voice cloning returned empty results")
+
+            # Save cloned audio
+            out = f"/tmp/cosyvoice_cloned_{uuid.uuid4().hex[:8]}.wav"
+            torchaudio.save(out, results[0]["tts_speech"], 22050)
+
+            voice_id = name.lower().replace(" ", "_")
+            _VOICES[voice_id] = {
+                "voice_id": voice_id,
+                "name": name,
+                "language": "multilingual",
+                "gender": "neutral",
+                "style": "cloned",
+                "created_at": time.time(),
+            }
+            return {"voice_id": voice_id, "name": name, "audio_path": out, "model": MODEL_DIR}
+        except ImportError as e:
+            raise HTTPException(503, f"CosyVoice dependencies not installed: {e}")
+        except Exception as e:
+            log.exception(f"[cosyvoice] Clone failed: {e}")
+            raise HTTPException(500, f"Voice cloning failed: {e}")
 
     @app.get("/voices")
     def voices() -> Dict[str, List[Dict[str, Any]]]:

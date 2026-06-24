@@ -190,11 +190,33 @@ class S3StorageEngine(BaseEngine):
 
     @engine_method
     def get(self, key: str) -> bytes:
-        raise EngineError("S3 storage get() not implemented via legacy helper; use s3_uploader.generate_presigned_url for direct downloads")
+        """Download an object from S3."""
+        try:
+            from s3_uploader import get_s3_client, S3_BUCKET  # type: ignore
+        except ImportError as e:
+            raise EngineError("s3_uploader module not available") from e
+        client = get_s3_client()
+        try:
+            response = client.get_object(Bucket=S3_BUCKET, Key=key)
+            return response["Body"].read()
+        except client.exceptions.NoSuchKey:
+            raise EngineError(f"key not found in S3: {key}")
+        except Exception as e:
+            raise EngineError(f"S3 get failed: {e}") from e
 
     @engine_method
     def delete(self, key: str) -> Dict[str, Any]:
-        raise EngineError("S3 storage delete() not implemented via legacy helper; the s3_uploader keeps its own lifecycle")
+        """Delete an object from S3."""
+        try:
+            from s3_uploader import get_s3_client, S3_BUCKET  # type: ignore
+        except ImportError as e:
+            raise EngineError("s3_uploader module not available") from e
+        client = get_s3_client()
+        try:
+            client.delete_object(Bucket=S3_BUCKET, Key=key)
+            return {"deleted": key}
+        except Exception as e:
+            raise EngineError(f"S3 delete failed: {e}") from e
 
     @engine_method
     def url(self, key: str, expires_sec: int = 3600) -> str:

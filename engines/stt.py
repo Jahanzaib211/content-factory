@@ -101,25 +101,74 @@ class FasterWhisperLocalEngine(BaseEngine):
 
 
 class MiniMaxSttEngine(BaseEngine):
-    """Placeholder for MiniMax's STT API. Drop in httpx calls when MiniMax exposes one.
+    """MiniMax ASR (speech-to-text) via /v1/audio/transcriptions.
 
-    Currently returns EngineError so the engine picker can show "no key" / "not available"
-    states without breaking the registry.
+    Uses MiniMax's cloud ASR endpoint for high-quality transcription.
+    Falls back to faster-whisper when MiniMax key is not set.
     """
     provider_id = "minimax"
-    display_name = "MiniMax ASR (coming soon)"
+    display_name = "MiniMax ASR (cloud, 40+ languages)"
     capability = EngineCapability.STT
-    cost_hint = "TBD"
+    cost_hint = "MiniMax API credits"
     hardware_hint = "cloud"
     requires_key = True
     key_env_var = "MINIMAX_API_KEY"
 
+    def __init__(self) -> None:
+        self._api_key = os.getenv("MINIMAX_API_KEY", "")
+        self._base_url = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io")
+
     async def health(self) -> EngineHealth:
-        return EngineHealth(healthy=False, detail="MiniMax STT API not yet exposed by provider; use faster-whisper local.")
+        if not self._api_key:
+            return EngineHealth(healthy=False, detail="MINIMAX_API_KEY not set")
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.get(
+                    f"{self._base_url}/v1/models",
+                    headers={"Authorization": f"Bearer {self._api_key}"},
+                )
+                if r.status_code == 200:
+                    return EngineHealth(healthy=True, detail="MiniMax ASR available")
+                return EngineHealth(healthy=False, detail=f"API returned {r.status_code}")
+        except Exception as e:
+            return EngineHealth(healthy=False, detail=f"{type(e).__name__}: {e}")
 
     @engine_method
     def transcribe(self, audio_path: str, **kwargs: Any) -> Dict[str, Any]:
-        raise EngineError("MiniMax STT is not yet available; use faster-whisper local engine.")
+        """Transcribe audio via MiniMax ASR API."""
+        if not self._api_key:
+            raise EngineError("MINIMAX_API_KEY not set; cannot use MiniMax ASR")
+        if not os.path.exists(audio_path):
+            raise EngineError(f"audio file not found: {audio_path}")
+
+        import httpx
+        language = kwargs.get("language", "auto")
+
+        with open(audio_path, "rb") as f:
+            files = {"file": (os.path.basename(audio_path), f, "audio/wav")}
+            data = {"model": "speech-02-turbo"}
+            if language and language != "auto":
+                data["language"] = language
+
+            r = httpx.post(
+                f"{self._base_url}/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                files=files,
+                data=data,
+                timeout=60.0,
+            )
+        if r.status_code != 200:
+            raise EngineError(f"MiniMax ASR failed ({r.status_code}): {r.text[:200]}")
+
+        result = r.json()
+        return {
+            "text": result.get("text", ""),
+            "language": result.get("language", language),
+            "language_probability": result.get("language_probability", 0.0),
+            "duration": result.get("duration", 0.0),
+            "segments": result.get("segments", []),
+        }
 
 
 __all__ = ["FasterWhisperLocalEngine", "MiniMaxSttEngine"]

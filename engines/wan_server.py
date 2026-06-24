@@ -32,23 +32,77 @@ _TASKS: Dict[str, Dict[str, Any]] = {}
 
 
 def _process_task(task_id: str, prompt: str, image_url: Optional[str], duration: int, size: str) -> None:
-    """Run the actual Wan 2.1 inference. Stub when model not loaded."""
+    """Run the actual Wan 2.1 inference using diffusers."""
     _TASKS[task_id]["status"] = "Processing"
     _TASKS[task_id]["started_at"] = time.time()
     try:
-        # Real implementation would call wan2.1 / diffusers here.
-        # This stub returns Success after a simulated wait so the rest
-        # of the pipeline can be wired + tested without GPU.
+        import torch
+        from diffusers import WanPipeline, WanImageToVideoPipeline
+        from diffusers.utils import export_to_video, load_image
+
         log.info(f"[wan] task {task_id}: prompt='{prompt[:50]}' size={size} duration={duration}")
-        time.sleep(2.0)  # simulate inference
+
+        # Parse size
+        width, height = [int(x) for x in size.split("*")]
+
+        # Load model (cached after first load)
+        global _wan_model, _wan_i2v_model
+        if image_url:
+            if _wan_i2v_model is None:
+                log.info("[wan] Loading Wan 2.1 I2V model...")
+                _wan_i2v_model = WanImageToVideoPipeline.from_pretrained(
+                    "Wan-AI/Wan2.1-I2V-14B-720P",
+                    torch_dtype=torch.bfloat16,
+                )
+                if torch.cuda.is_available():
+                    _wan_i2v_model.to("cuda")
+            model = _wan_i2v_model
+            image = load_image(image_url)
+            output = model(
+                prompt=prompt,
+                image=image,
+                num_frames=int(duration * 8),  # ~8 fps
+                width=width,
+                height=height,
+                num_inference_steps=50,
+            ).frames[0]
+        else:
+            if _wan_model is None:
+                log.info("[wan] Loading Wan 2.1 T2V model...")
+                _wan_model = WanPipeline.from_pretrained(
+                    "Wan-AI/Wan2.1-T2V-14B-720P",
+                    torch_dtype=torch.bfloat16,
+                )
+                if torch.cuda.is_available():
+                    _wan_model.to("cuda")
+            model = _wan_model
+            output = model(
+                prompt=prompt,
+                num_frames=int(duration * 8),
+                width=width,
+                height=height,
+                num_inference_steps=50,
+            ).frames[0]
+
+        # Save video
+        file_id = f"wan_{task_id}"
+        out_path = f"/tmp/{file_id}.mp4"
+        export_to_video(output, out_path, fps=8)
+
         _TASKS[task_id].update({
             "status": "Success",
-            "file_id": f"wan_{task_id}",
+            "file_id": file_id,
+            "output_path": out_path,
             "completed_at": time.time(),
         })
     except Exception as e:
         log.exception(f"[wan] task {task_id} failed: {e}")
         _TASKS[task_id].update({"status": "Fail", "error": str(e)})
+
+
+# Model cache (loaded once, reused across requests)
+_wan_model = None
+_wan_i2v_model = None
 
 
 def create_app():  # pragma: no cover - optional FastAPI server
