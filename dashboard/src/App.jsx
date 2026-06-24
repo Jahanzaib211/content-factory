@@ -546,7 +546,7 @@ function App() {
           </div>
         </a>
         <a
-          href="https://github.com/jahanzaib/content-factory"
+          href="https://github.com/Jahanzaib211/content-factory"
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-2 p-3 bg-white/5 hover:bg-white/10 rounded-xl transition-colors group"

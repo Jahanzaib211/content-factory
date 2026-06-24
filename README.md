@@ -6,8 +6,8 @@
 [![Open Source](https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://opensource.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
-[![GitHub stars](https://img.shields.io/github/stars/jahanzaib/content-factory?style=social)](https://github.com/jahanzaib/content-factory)
-[![Last Commit](https://img.shields.io/github/last-commit/jahanzaib/content-factory)](https://github.com/jahanzaib/content-factory/commits/main)
+[![GitHub stars](https://img.shields.io/github/stars/Jahanzaib211/content-factory?style=social)](https://github.com/Jahanzaib211/content-factory)
+[![Last Commit](https://img.shields.io/github/last-commit/Jahanzaib211/content-factory)](https://github.com/Jahanzaib211/content-factory/commits/main)
 
 **Free & open source AI video platform** with 3 tools in one: **Clip Generator**, **AI Shorts (UGC videos with AI actors)**, and **YouTube Studio**. Self-hosted with Docker. No watermarks, no limits.
 
@@ -180,7 +180,7 @@ Content Factory is free. You only pay for the AI APIs you use — and most have 
 
 ### 1. Clone
 ```bash
-git clone https://github.com/jahanzaib/content-factory.git
+git clone https://github.com/Jahanzaib211/content-factory.git
 cd content-factory
 ```
 
@@ -288,12 +288,12 @@ Navigate to **`http://localhost:5175`**
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=jahanzaib/content-factory&type=Date)](https://star-history.com/#jahanzaib/content-factory&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=Jahanzaib211/content-factory&type=Date)](https://star-history.com/#Jahanzaib211/content-factory&Date)
 
 ## Credits
 
 - Forked from [mutonby/OpenShorts](https://github.com/mutonby/openshorts) by mutonby
-- See [Contributors](https://github.com/jahanzaib/content-factory/graphs/contributors) for the full list
+- See [Contributors](https://github.com/Jahanzaib211/content-factory/graphs/contributors) for the full list
 
 ## Contributions
 

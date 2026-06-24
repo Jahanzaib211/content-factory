@@ -204,7 +204,7 @@ export default function Landing({ onLaunchApp }) {
           </div>
           <div className="flex items-center gap-3">
             <a
-              href="https://github.com/jahanzaib/content-factory"
+              href="https://github.com/Jahanzaib211/content-factory"
               target="_blank"
               rel="noopener noreferrer"
               className="hidden sm:flex items-center gap-2 text-sm text-zinc-400 hover:text-white transition-colors"
@@ -249,7 +249,7 @@ export default function Landing({ onLaunchApp }) {
               <ArrowRight size={20} />
             </button>
             <a
-              href="https://github.com/jahanzaib/content-factory"
+              href="https://github.com/Jahanzaib211/content-factory"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-2 bg-white/5 border border-white/10 text-white px-8 py-3.5 rounded-xl font-medium transition-all hover:bg-white/10 text-lg"
@@ -580,7 +580,7 @@ export default function Landing({ onLaunchApp }) {
               <ArrowRight size={20} />
             </button>
             <a
-              href="https://github.com/jahanzaib/content-factory"
+              href="https://github.com/Jahanzaib211/content-factory"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors text-sm"

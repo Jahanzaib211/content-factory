@@ -2,7 +2,7 @@ import React from 'react';
 import { ArrowLeft } from 'lucide-react';
 
 const LAST_UPDATED = '2026-05-06';
-const ISSUES_URL = 'https://github.com/jahanzaib/content-factory/issues';
+const ISSUES_URL = 'https://github.com/Jahanzaib211/content-factory/issues';
 
 function Section({ title, children }) {
     return (
