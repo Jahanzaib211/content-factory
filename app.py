@@ -313,6 +313,74 @@ async def run_job(job_id, job_data):
 async def get_config():
     return {"youtubeUrlEnabled": not DISABLE_YOUTUBE_URL}
 
+
+# ── Engines registry (new in Content Factory) ──────────────────────────
+# Exposes the engines/ package to the Settings UI engine picker.
+# Additive — does not replace any existing endpoint.
+
+@app.get("/api/engines/list")
+async def list_engines():
+    """Return all registered engines grouped by capability.
+
+    Response shape:
+    {
+      "image":  [{"provider_id": "minimax", "display_name": "...", ...}, ...],
+      "tts":    [...],
+      "music":  [...],
+      ...
+    }
+    """
+    from engines import list_providers, EngineCapability
+    out: Dict[str, List[Dict]] = {}
+    for cap in EngineCapability:
+        out[cap.value] = list_providers(cap)
+    return out
+
+
+@app.get("/api/engines/health")
+async def engines_health():
+    """Run health() on the active engine for each capability that has one.
+
+    Used by the Settings UI 'Self-Hosted Stack' status card to show
+    green/yellow/red dots per service.
+    """
+    from engines import get_active, EngineCapability
+    out: Dict[str, Dict] = {}
+    for cap in EngineCapability:
+        eng = get_active(cap)
+        if eng is None:
+            continue
+        try:
+            h = await eng.health()
+            out[cap.value] = {
+                "provider": eng.provider_id,
+                "display_name": eng.display_name,
+                **h.to_dict(),
+            }
+        except Exception as e:
+            out[cap.value] = {
+                "provider": eng.provider_id,
+                "display_name": eng.display_name,
+                "healthy": False,
+                "detail": f"{type(e).__name__}: {e}",
+            }
+    return out
+
+
+@app.get("/api/engines/feature-flags")
+async def engines_feature_flags():
+    """Return the current runtime feature flags for the Settings UI."""
+    from engines import FeatureFlags
+    return {
+        "use_minimax_video": FeatureFlags.use_minimax_video(),
+        "use_minimax_tts": FeatureFlags.use_minimax_tts(),
+        "use_minimax_music": FeatureFlags.use_minimax_music(),
+        "use_legacy_fal": FeatureFlags.use_legacy_fal(),
+        "use_legacy_elevenlabs": FeatureFlags.use_legacy_elevenlabs(),
+        "use_legacy_s3": FeatureFlags.use_legacy_s3(),
+        "use_legacy_upload_post": FeatureFlags.use_legacy_upload_post(),
+    }
+
 @app.post("/api/process")
 async def process_endpoint(
     request: Request,
