@@ -903,14 +903,26 @@ async def social_instagram_callback(code: str):
 @app.get("/api/social/connections")
 async def social_connections():
     """Show all social connection statuses."""
-    from engines.social import YouTubeEngine, TikTokEngine, InstagramEngine
+    from engines.social import YouTubeEngine, TikTokEngine, InstagramEngine, _load_tokens
     out = {}
+    tokens = _load_tokens()
     for name, eng_cls in (("youtube", YouTubeEngine), ("tiktok", TikTokEngine), ("instagram", InstagramEngine)):
         try:
             eng = eng_cls()
-            out[name] = eng.status().data if hasattr(eng.status(), "data") else eng.status()
+            # status() is sync and decorated with @engine_method (returns EngineResult via async wrapper).
+            # We call status() directly and unwrap.
+            if name in tokens:
+                tok = tokens[name]
+                out[name] = {
+                    "connected": True,
+                    "platform": name,
+                    "connected_at": tok.get("connected_at"),
+                    "expires_at": tok.get("expires_at"),
+                }
+            else:
+                out[name] = {"connected": False, "platform": name, "error": "Not connected"}
         except Exception as e:
-            out[name] = {"connected": False, "error": str(e)}
+            out[name] = {"connected": False, "platform": name, "error": str(e)}
     return out
 
 
