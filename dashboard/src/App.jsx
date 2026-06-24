@@ -133,6 +133,56 @@ const pollJob = async (jobId) => {
   return res.json();
 };
 
+// EnginePicker: one dropdown per capability (read-only for now; the registry
+// is small — MiniMax is the only registered provider today. Phase 5 will add
+// local OSS providers; the UI auto-renders new entries via the registry shape).
+function EnginePicker({ enginesByCap, enginesHealth, onRefresh }) {
+  const caps = Object.entries(enginesByCap).filter(([, providers]) => providers && providers.length > 0);
+  if (caps.length === 0) {
+    return <div className="text-xs text-zinc-500 italic">No engines registered yet.</div>;
+  }
+  return (
+    <div className="space-y-3">
+      {caps.map(([cap, providers]) => {
+        const health = enginesHealth[cap];
+        const status = health
+          ? health.healthy
+            ? { color: 'text-green-400', label: 'healthy' }
+            : /not set|missing key/i.test(health.detail || '')
+              ? { color: 'text-amber-400', label: 'no key' }
+              : { color: 'text-red-400', label: 'error' }
+          : { color: 'text-zinc-500', label: 'unknown' };
+        return (
+          <div key={cap} className="flex items-center gap-3 p-3 border border-white/5 rounded-lg">
+            <div className="w-32 shrink-0">
+              <div className="text-sm text-white capitalize">{cap}</div>
+              <div className={`text-[10px] ${status.color} uppercase tracking-wider`}>{status.label}</div>
+            </div>
+            <select
+              defaultValue={providers[0].provider_id}
+              disabled
+              className="flex-1 bg-black/50 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-primary disabled:opacity-70"
+            >
+              {providers.map((p) => (
+                <option key={p.provider_id} value={p.provider_id}>
+                  {p.display_name} {p.cost_hint ? `(${p.cost_hint})` : ''}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={onRefresh}
+              className="text-[10px] text-zinc-400 hover:text-white border border-white/10 hover:bg-white/5 rounded px-2 py-1 transition-colors"
+              title="Re-probe"
+            >
+              ⟳
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function App() {
   const [apiKey, setApiKey] = useState(localStorage.getItem('gemini_key') || '');
   const [minimaxKey, setMinimaxKey] = useState(() => {
@@ -140,6 +190,22 @@ function App() {
     if (stored) return decrypt(stored);
     return '';
   });
+
+  // Content Factory: engines registry + health (new in Phase 2)
+  const [enginesByCap, setEnginesByCap] = useState({});
+  const [enginesHealth, setEnginesHealth] = useState({});
+  const fetchEngines = async () => {
+    try {
+      const [list, health] = await Promise.all([
+        fetch(getApiUrl('/api/engines/list')).then((r) => (r.ok ? r.json() : {})),
+        fetch(getApiUrl('/api/engines/health')).then((r) => (r.ok ? r.json() : {})),
+      ]);
+      setEnginesByCap(list || {});
+      setEnginesHealth(health || {});
+    } catch (_) {
+      // silently ignore — UI just shows empty state
+    }
+  };
   // Social API State - Load encrypted or plain
   const [uploadPostKey, setUploadPostKey] = useState(() => {
     const stored = localStorage.getItem('uploadPostKey_v3');
@@ -275,6 +341,13 @@ function App() {
       fetchUserProfiles();
     }
   }, [uploadPostKey]);
+
+  // Content Factory: fetch engine registry + health when Settings tab opens
+  useEffect(() => {
+    if (activeTab === 'settings') {
+      fetchEngines();
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     let interval;
@@ -766,6 +839,97 @@ function App() {
                     </span>
                   </p>
                 </div>
+              </div>
+
+              {/* ── Content Factory: Active Engines card ─────────────── */}
+              <div className="glass-panel p-6 mt-8">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold">Active Engines</h2>
+                  <span className="text-[10px] bg-green-500/10 border border-green-500/30 px-2 py-0.5 rounded text-green-400 uppercase tracking-wider">Recommended</span>
+                </div>
+                <p className="text-xs text-zinc-500 mb-6 leading-relaxed">
+                  Content Factory runs the AI pipeline through pluggable <strong>engines</strong>.
+                  Each capability (LLM, TTS, image, video, voice clone, music) has one or more
+                  registered providers. Pick the active one per capability. Defaults preserve
+                  current behavior; legacy providers stay available.
+                </p>
+
+                <EnginePicker
+                  enginesByCap={enginesByCap}
+                  enginesHealth={enginesHealth}
+                  onRefresh={fetchEngines}
+                />
+              </div>
+
+              {/* ── Content Factory: Free & Open Source (built-in) ──── */}
+              <div className="glass-panel p-6 mt-8">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold">Free &amp; Open Source (built-in)</h2>
+                  <span className="text-[10px] bg-green-500/10 border border-green-500/30 px-2 py-0.5 rounded text-green-400 uppercase tracking-wider">No API key</span>
+                </div>
+                <p className="text-xs text-zinc-500 mb-6 leading-relaxed">
+                  Components already bundled with Content Factory &mdash; zero API key needed.
+                  Phase 5 will add local OSS fallbacks (vLLM, ComfyUI, Wan 2.1, CosyVoice) that
+                  show up here as additional engine options.
+                </p>
+                <ul className="space-y-2 text-sm text-zinc-300">
+                  {[
+                    { name: 'faster-whisper', desc: 'Speech-to-text, 99 languages, word-level timestamps' },
+                    { name: 'FFmpeg', desc: 'Video processing, composition, subtitle burning' },
+                    { name: 'MediaPipe', desc: 'Face detection & tracking' },
+                    { name: 'YOLOv8', desc: 'Person & object detection' },
+                    { name: 'PySceneDetect', desc: 'Scene boundary detection' },
+                    { name: 'LiteLLM', desc: 'LLM routing (MiniMax / Gemini / local)' },
+                    { name: 'Local filesystem', desc: 'Storage backend (no S3 needed)' },
+                  ].map((c) => (
+                    <li key={c.name} className="flex items-start gap-2">
+                      <Check size={14} className="text-green-400 shrink-0 mt-1" />
+                      <span><strong className="text-white">{c.name}</strong> &mdash; {c.desc}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* ── Content Factory: Self-Hosted Stack status card ──── */}
+              <div className="glass-panel p-6 mt-8">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold">Self-Hosted Stack</h2>
+                  <span className="text-[10px] bg-zinc-700/50 border border-zinc-600/30 px-2 py-0.5 rounded text-zinc-400 uppercase tracking-wider">Optional</span>
+                </div>
+                <p className="text-xs text-zinc-500 mb-6 leading-relaxed">
+                  Health probe for every registered engine. <span className="text-green-400">Green</span> = healthy,{' '}
+                  <span className="text-amber-400">amber</span> = missing API key,{' '}
+                  <span className="text-red-400">red</span> = error. The Phase 5 self-hosted services
+                  (vLLM, ComfyUI, Wan 2.1, CosyVoice, faster-whisper) will appear here as additional
+                  providers become registered.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {Object.keys(enginesByCap).filter((c) => enginesByCap[c] && enginesByCap[c].length > 0).length === 0 && (
+                    <div className="text-xs text-zinc-500 italic">Loading engine registry…</div>
+                  )}
+                  {Object.entries(enginesByCap).flatMap(([cap, providers]) =>
+                    providers.map((p) => {
+                      const health = enginesHealth[cap];
+                      const healthy = health && health.healthy;
+                      const missingKey = health && !health.healthy && health.detail && /not set|missing key/i.test(health.detail);
+                      const color = healthy ? 'text-green-400' : missingKey ? 'text-amber-400' : 'text-red-400';
+                      const dot = healthy ? 'bg-green-400' : missingKey ? 'bg-amber-400' : 'bg-red-400';
+                      return (
+                        <div key={`${cap}:${p.provider_id}`} className="flex items-center gap-2 p-2 border border-white/5 rounded-lg">
+                          <span className={`w-2 h-2 rounded-full ${dot}`} />
+                          <span className={`text-xs ${color} capitalize`}>{cap}</span>
+                          <span className="text-xs text-zinc-300 truncate">{p.display_name}</span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+                <button
+                  onClick={fetchEngines}
+                  className="mt-4 text-xs text-zinc-400 hover:text-white border border-white/10 hover:bg-white/5 rounded-lg px-3 py-1.5 transition-colors"
+                >
+                  Refresh health
+                </button>
               </div>
             </div>
           )}
