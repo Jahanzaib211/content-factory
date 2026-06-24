@@ -22,10 +22,15 @@ try:
     from engines import FeatureFlags
     from engines.minimax_speech import MiniMaxSpeechEngine
     from minimax_client import get_client as get_ai_client
+    from app import trace_llm_call
 except Exception:  # pragma: no cover - engines package is always present in CF
     FeatureFlags = None
     MiniMaxSpeechEngine = None
     get_ai_client = None
+    try:
+        trace_llm_call = lambda *a, **k: (lambda f: f)
+    except Exception:
+        trace_llm_call = lambda *a, **k: (lambda f: f)
 
 ELEVENLABS_API_BASE = "https://api.elevenlabs.io/v1"
 
@@ -275,6 +280,7 @@ def _translate_video_elevenlabs(
         time.sleep(poll_interval)
 
 
+@trace_llm_call("translate_video_minimax")
 def _translate_video_minimax(
     video_path: str,
     output_path: str,
