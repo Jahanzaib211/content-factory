@@ -836,6 +836,110 @@ async def factory_calendar_get():
     return {"entries": _load_json(FACTORY_CALENDAR_PATH, [])}
 
 
+def _factory_run_job(job_id: str) -> None:
+    """Worker function: loads the job, runs the template, writes back status.
+    Runs in a thread via run_in_executor."""
+    from engines.factory_runner import execute_template
+    jobs = _load_json(FACTORY_JOBS_PATH, [])
+    job = next((j for j in jobs if j.get("job_id") == job_id), None)
+    if job is None:
+        return
+    job["status"] = "running"
+    job["started_at"] = time.time()
+    try:
+        result = asyncio.run(execute_template(job["template_id"], job))
+        job["status"] = "completed"
+        job["outputs"] = result.get("outputs", [])
+        job["cost_estimate"] = result.get("cost_estimate", {})
+        job["completed_at"] = time.time()
+        job.setdefault("logs", []).append(
+            f"[{time.strftime('%H:%M:%S')}] DONE: {len(job['outputs'])} output(s), "
+            f"cost ${job['cost_estimate'].get('total', 0):.2f}"
+        )
+    except Exception as e:
+        log.exception(f"[factory_runner] job {job_id} failed: {e}")
+        job["status"] = "failed"
+        job["error"] = str(e)
+        job["completed_at"] = time.time()
+        job.setdefault("logs", []).append(f"[{time.strftime('%H:%M:%S')}] FAILED: {e}")
+    finally:
+        # Persist updated job state back to jobs.json
+        all_jobs = _load_json(FACTORY_JOBS_PATH, [])
+        for i, j in enumerate(all_jobs):
+            if j.get("job_id") == job_id:
+                all_jobs[i] = job
+                break
+        _save_json(FACTORY_JOBS_PATH, all_jobs)
+
+
+@app.post("/api/factory/execute/{job_id}")
+async def factory_execute(job_id: str, background_tasks: BackgroundTasks):
+    """Kick off template execution for a queued job. Returns immediately;
+    the frontend polls /api/factory/jobs/{job_id} for status updates."""
+    jobs = _load_json(FACTORY_JOBS_PATH, [])
+    job = next((j for j in jobs if j.get("job_id") == job_id), None)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job.get("status") == "running":
+        return {"job_id": job_id, "status": "already_running"}
+    if job.get("status") == "completed":
+        return {"job_id": job_id, "status": "already_completed", "outputs": job.get("outputs", [])}
+
+    job["status"] = "queued"
+    job.setdefault("logs", []).append(f"[{time.strftime('%H:%M:%S')}] QUEUED")
+    _save_json(FACTORY_JOBS_PATH, jobs)
+
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _factory_run_job, job_id)
+    return {"job_id": job_id, "status": "started"}
+
+
+# ── Avatar Studio download ───────────────────────────────────────────
+
+@app.get("/api/avatar-studio/download/{file_id}")
+async def avatar_studio_download(file_id: str):
+    """Download a generated avatar video. file_id may be:
+      - MiniMax S2V file_id (we re-fetch the URL + stream the bytes)
+      - A local filename inside output/avatar_studio/
+    """
+    import httpx as _httpx
+
+    # Local lookup first
+    safe = os.path.basename(file_id)
+    for root in ["output/avatar_studio", "output"]:
+        local = os.path.join(root, safe)
+        if os.path.exists(local) and os.path.isfile(local):
+            from fastapi.responses import FileResponse
+            return FileResponse(local, media_type="video/mp4", filename=safe)
+
+    # MiniMax fallback: query files API and stream the download_url
+    if os.getenv("MINIMAX_API_KEY"):
+        try:
+            async with _httpx.AsyncClient(timeout=30.0) as c:
+                r = await c.get(
+                    "https://api.MiniMax.io/v1/files/retrieve",
+                    headers={"Authorization": f"Bearer {os.getenv('MINIMAX_API_KEY')}"},
+                    params={"file_id": file_id},
+                )
+            if r.status_code == 200:
+                meta = r.json().get("file", {})
+                dl_url = meta.get("download_url")
+                if dl_url:
+                    async with _httpx.AsyncClient(timeout=600.0) as c:
+                        v = await c.get(dl_url)
+                        if v.status_code == 200:
+                            from fastapi.responses import Response
+                            return Response(
+                                content=v.content,
+                                media_type="video/mp4",
+                                headers={"Content-Disposition": f'attachment; filename="{safe}.mp4"'},
+                            )
+        except Exception as e:
+            log.warning(f"[avatar-studio] MiniMax download fallback failed: {e}")
+
+    raise HTTPException(status_code=404, detail=f"file not found: {file_id}")
+
+
 # ── Direct Social OAuth ──────────────────────────────────────────────
 
 @app.get("/api/social/youtube/connect")

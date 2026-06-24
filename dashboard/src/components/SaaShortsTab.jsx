@@ -70,11 +70,9 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
   const [actorGallery, setActorGallery] = useState([]);
   const [loadingGallery, setLoadingGallery] = useState(false);
   const [uploadedActorPreview, setUploadedActorPreview] = useState(null); // {localPreview, serverUrl}
-  // productPhoto and productDescription are reserved for a future product-presence feature.
-  // eslint-disable-next-line no-unused-vars
-  const [_productPhoto] = useState(null);
-  // eslint-disable-next-line no-unused-vars
-  const [_productDescription] = useState('');
+  // Reserved for future product-presence feature.
+  const [, setProductPhoto] = useState(null);
+  const [, setProductDescription] = useState('');
 
   // Step 3: Generate
   const [generating, setGenerating] = useState(false);
