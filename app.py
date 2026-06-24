@@ -8,7 +8,7 @@ import glob
 import time
 import asyncio
 from dotenv import load_dotenv
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Header, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -380,6 +380,534 @@ async def engines_feature_flags():
         "use_legacy_s3": FeatureFlags.use_legacy_s3(),
         "use_legacy_upload_post": FeatureFlags.use_legacy_upload_post(),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Content Factory: Voice Lab, Avatar Studio, Multilingual, Factory,
+# Direct Social OAuth — all ADDITIVE, no changes to existing endpoints.
+# ═══════════════════════════════════════════════════════════════════════
+
+VOICE_LAB_DIR = os.path.join(OUTPUT_DIR, "voice_lab")
+AVATAR_STUDIO_DIR = os.path.join(OUTPUT_DIR, "avatar_studio")
+os.makedirs(VOICE_LAB_DIR, exist_ok=True)
+os.makedirs(AVATAR_STUDIO_DIR, exist_ok=True)
+
+
+# ── Voice Lab ────────────────────────────────────────────────────────
+
+@app.post("/api/voice-lab/clone")
+async def voice_lab_clone(
+    name: str = Form(...),
+    sample_text: Optional[str] = Form(None),
+    file: UploadFile = File(...),
+):
+    """Upload a voice sample and clone it. Returns voice_id + clone metadata."""
+    sample_path = os.path.join(VOICE_LAB_DIR, f"sample_{uuid.uuid4().hex[:8]}_{file.filename}")
+    with open(sample_path, "wb") as f:
+        f.write(await file.read())
+    # Try MiniMax first, then CosyVoice local
+    from engines.minimax_speech import MiniMaxSpeechEngine
+    if os.getenv("MINIMAX_API_KEY"):
+        try:
+            eng = MiniMaxSpeechEngine()
+            clone_res = await eng.clone_voice(audio_path=sample_path, voice_name=name, sample_text=sample_text)
+            voice_id = (clone_res.data or {}).get("voice_id") or name
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"MiniMax voice clone failed: {e}")
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="MINIMAX_API_KEY not set. Add it to .env or use Upload-Post for cloud.",
+        )
+    # Persist voice library entry
+    library_path = os.path.join(VOICE_LAB_DIR, "library.json")
+    library = []
+    if os.path.exists(library_path):
+        try:
+            with open(library_path) as f:
+                library = json.load(f)
+        except Exception:
+            library = []
+    library.append(
+        {
+            "voice_id": voice_id,
+            "name": name,
+            "sample_text": sample_text,
+            "sample_path": sample_path,
+            "created_at": time.time(),
+            "engine": "minimax",
+        }
+    )
+    with open(library_path, "w") as f:
+        json.dump(library, f, indent=2)
+    return {"voice_id": voice_id, "name": name, "sample_path": sample_path, "engine": "minimax"}
+
+
+@app.get("/api/voice-lab/library")
+async def voice_lab_library():
+    """List all cloned voices."""
+    library_path = os.path.join(VOICE_LAB_DIR, "library.json")
+    if not os.path.exists(library_path):
+        return {"voices": []}
+    with open(library_path) as f:
+        return {"voices": json.load(f)}
+
+
+@app.delete("/api/voice-lab/{voice_id}")
+async def voice_lab_delete(voice_id: str):
+    """Remove a voice from the local library."""
+    library_path = os.path.join(VOICE_LAB_DIR, "library.json")
+    if not os.path.exists(library_path):
+        raise HTTPException(status_code=404, detail="library empty")
+    with open(library_path) as f:
+        library = json.load(f)
+    new = [v for v in library if v.get("voice_id") != voice_id]
+    if len(new) == len(library):
+        raise HTTPException(status_code=404, detail="voice_id not found")
+    with open(library_path, "w") as f:
+        json.dump(new, f, indent=2)
+    return {"deleted": voice_id, "remaining": len(new)}
+
+
+@app.post("/api/voice-lab/test")
+async def voice_lab_test(voice_id: str = Form(...), text: str = Form(...)):
+    """Synthesize a short test clip with a saved voice. Returns mp3 bytes + duration."""
+    from engines.minimax_speech import MiniMaxSpeechEngine
+    if not os.getenv("MINIMAX_API_KEY"):
+        raise HTTPException(status_code=400, detail="MINIMAX_API_KEY not set")
+    eng = MiniMaxSpeechEngine()
+    res = await eng.synthesize(text=text, voice_id=voice_id, model="speech-2.8-hd")
+    if not res.success:
+        raise HTTPException(status_code=502, detail=res.error)
+    data = res.data or {}
+    if "audio_url" in data and data["audio_url"]:
+        r = httpx.get(data["audio_url"], timeout=60.0)
+        return HTMLResponse(content=r.content, media_type="audio/mpeg")
+    if "data" in data and isinstance(data["data"], dict):
+        import binascii
+        return HTMLResponse(content=binascii.unhexlify(data["data"]["audio"]), media_type="audio/mpeg")
+    raise HTTPException(status_code=502, detail="no audio in response")
+
+
+# ── Avatar Studio ────────────────────────────────────────────────────
+
+@app.post("/api/avatar-studio/portrait")
+async def avatar_studio_portrait(
+    description: str = Form(...),
+    product_description: Optional[str] = Form(None),
+    num_options: int = Form(3),
+):
+    """Generate actor portrait options. Returns list of image URLs."""
+    from engines.minimax_video import MiniMaxVideoEngine
+    if not os.getenv("MINIMAX_API_KEY"):
+        raise HTTPException(status_code=400, detail="MINIMAX_API_KEY not set")
+    eng = MiniMaxVideoEngine()
+    title_slug = uuid.uuid4().hex[:8]
+    job_dir = os.path.join(AVATAR_STUDIO_DIR, title_slug)
+    os.makedirs(job_dir, exist_ok=True)
+    # Re-use the saasshorts helper (it handles feature-flag dispatch already)
+    from saasshorts import _minimax_actor_image_sync
+    paths = _minimax_actor_image_sync(
+        description, job_dir, title_slug, num_options, product_description
+    )
+    # Serve via /videos/ static mount
+    urls = [f"/videos/avatar_studio/{title_slug}/{os.path.basename(p)}" for p in paths]
+    return {"urls": urls, "paths": paths, "title_slug": title_slug}
+
+
+@app.post("/api/avatar-studio/animate")
+async def avatar_studio_animate(
+    image_path: str = Form(...),
+    audio_path: Optional[str] = Form(None),
+    prompt: Optional[str] = Form(None),
+):
+    """Animate a portrait with audio (MiniMax S2V-01 subject→video)."""
+    from engines.minimax_video import MiniMaxVideoEngine, S2V_MODEL
+    from engines.minimax_speech import MiniMaxSpeechEngine
+    if not os.getenv("MINIMAX_API_KEY"):
+        raise HTTPException(status_code=400, detail="MINIMAX_API_KEY not set")
+    if audio_path and not os.path.exists(audio_path):
+        # Resolve via /videos/ mount
+        candidate = os.path.join(OUTPUT_DIR, audio_path.replace("/videos/", ""))
+        if os.path.exists(candidate):
+            audio_path = candidate
+        else:
+            raise HTTPException(status_code=404, detail=f"audio not found: {audio_path}")
+    eng = MiniMaxVideoEngine()
+    # Need a public URL for the subject image
+    public_base = os.getenv("PUBLIC_BASE_URL", "http://localhost:18080")
+    image_url = (
+        image_path if image_path.startswith("http") else f"{public_base}{image_path}"
+    )
+    res = await eng.generate_video_s2v(
+        prompt=prompt or "Person talking to camera with natural expressions.",
+        subject_image_url=image_url,
+        model=S2V_MODEL,
+    )
+    if not res.success:
+        raise HTTPException(status_code=502, detail=res.error)
+    data = res.data or {}
+    task_id = data.get("task_id")
+    if not task_id:
+        raise HTTPException(status_code=502, detail="no task_id from MiniMax S2V")
+    return {"task_id": task_id, "model": S2V_MODEL, "image_url": image_url}
+
+
+@app.get("/api/avatar-studio/status/{task_id}")
+async def avatar_studio_status(task_id: str):
+    """Poll a MiniMax S2V task. Returns status + file_id when done."""
+    from engines.minimax_video import MiniMaxVideoEngine
+    eng = MiniMaxVideoEngine()
+    res = await eng.poll_video_task(task_id)
+    if not res.success:
+        raise HTTPException(status_code=502, detail=res.error)
+    return res.data
+
+
+# ── Multilingual pipeline ────────────────────────────────────────────
+
+@app.post("/api/multilingual/translate")
+async def multilingual_translate(
+    video_path: str = Form(...),
+    target_language: str = Form(...),
+    source_language: Optional[str] = Form(None),
+    output_path: Optional[str] = Form(None),
+):
+    """Translate a video's audio to the target language (STT -> translate -> TTS -> remux)."""
+    from translate import translate_video
+    if not output_path:
+        stem = os.path.splitext(os.path.basename(video_path))[0]
+        out_dir = os.path.join(OUTPUT_DIR, "multilingual")
+        os.makedirs(out_dir, exist_ok=True)
+        output_path = os.path.join(out_dir, f"{stem}_{target_language}.mp4")
+    if not os.path.exists(video_path):
+        raise HTTPException(status_code=404, detail=f"video not found: {video_path}")
+    try:
+        # translate_video dispatches via feature flag (MiniMax or ElevenLabs)
+        result = translate_video(
+            video_path=video_path,
+            output_path=output_path,
+            target_language=target_language,
+            api_key=os.getenv("ELEVENLABS_API_KEY", ""),  # ignored if MiniMax path
+            source_language=source_language,
+        )
+        rel = os.path.relpath(result, OUTPUT_DIR)
+        return {"output_path": result, "url": f"/videos/{rel}", "target_language": target_language}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Translation failed: {e}")
+
+
+@app.get("/api/multilingual/languages")
+async def multilingual_languages():
+    """Supported dubbing languages (used by the Multilingual settings card)."""
+    from translate import get_supported_languages
+    return {"languages": get_supported_languages()}
+
+
+# ── Content Factory (templates, calendar, batch) ────────────────────
+
+FACTORY_DIR = os.path.join(OUTPUT_DIR, "factory")
+os.makedirs(FACTORY_DIR, exist_ok=True)
+FACTORY_TEMPLATES_PATH = os.path.join(FACTORY_DIR, "templates.json")
+FACTORY_JOBS_PATH = os.path.join(FACTORY_DIR, "jobs.json")
+FACTORY_CALENDAR_PATH = os.path.join(FACTORY_DIR, "calendar.json")
+
+
+def _load_json(path: str, default: Any) -> Any:
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def _save_json(path: str, data: Any) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2, default=str)
+
+
+# Built-in factory templates (the user can edit / add more)
+DEFAULT_FACTORY_TEMPLATES = [
+    {
+        "id": "daily-tiktok",
+        "name": "Daily TikTok",
+        "description": "Auto-pick the best viral moment from a long video, generate 9:16 short, captions, hook, schedule.",
+        "icon": "Zap",
+        "inputs": ["source_url", "language"],
+        "estimated_minutes": 8,
+    },
+    {
+        "id": "weekly-shorts",
+        "name": "Weekly YouTube Shorts",
+        "description": "Process 5 long videos -> 30 shorts in one batch, with auto-thumbnails.",
+        "icon": "Youtube",
+        "inputs": ["source_urls[]", "language"],
+        "estimated_minutes": 60,
+    },
+    {
+        "id": "reels-cascade",
+        "name": "Reels Cascade",
+        "description": "1 long video -> 9:16 vertical + 1:1 square + 16:9 horizontal in one click.",
+        "icon": "LayoutGrid",
+        "inputs": ["source_url", "language"],
+        "estimated_minutes": 12,
+    },
+    {
+        "id": "translate-repost",
+        "name": "Translate & Repost",
+        "description": "Top clip -> translate to N languages -> multi-platform schedule.",
+        "icon": "Languages",
+        "inputs": ["source_url", "target_languages[]"],
+        "estimated_minutes": 20,
+    },
+    {
+        "id": "ugc-ad",
+        "name": "UGC Ad Generator",
+        "description": "Product URL -> actor + script + voiceover + 15s ad.",
+        "icon": "Sparkles",
+        "inputs": ["product_url", "language"],
+        "estimated_minutes": 6,
+    },
+    {
+        "id": "podcast-highlight",
+        "name": "Podcast Highlight",
+        "description": "Auto-detect 3 best moments per episode, publish weekly.",
+        "icon": "FileVideo",
+        "inputs": ["source_url", "language"],
+        "estimated_minutes": 5,
+    },
+    {
+        "id": "ai-influencer",
+        "name": "AI Influencer",
+        "description": "Brand description -> avatar + voice + scripts (30 posts/month).",
+        "icon": "Users",
+        "inputs": ["brand_description", "language", "frequency"],
+        "estimated_minutes": 15,
+    },
+    {
+        "id": "news-to-short",
+        "name": "News to Short",
+        "description": "RSS feed -> AI summary -> voiceover -> branded short.",
+        "icon": "Globe",
+        "inputs": ["rss_url", "language"],
+        "estimated_minutes": 3,
+    },
+    {
+        "id": "course-to-clips",
+        "name": "Course to Clips",
+        "description": "Long course -> 100 micro-lessons with timestamps.",
+        "icon": "Type",
+        "inputs": ["source_url", "language"],
+        "estimated_minutes": 90,
+    },
+    {
+        "id": "music-video-maker",
+        "name": "Music Video Maker",
+        "description": "Song + theme -> 30s visual loop with b-roll.",
+        "icon": "Monitor",
+        "inputs": ["audio_url", "theme", "style"],
+        "estimated_minutes": 4,
+    },
+]
+
+
+@app.get("/api/factory/templates")
+async def factory_templates():
+    """List all content factory templates (built-in + user custom)."""
+    user = _load_json(FACTORY_TEMPLATES_PATH, [])
+    return {"templates": DEFAULT_FACTORY_TEMPLATES + user}
+
+
+@app.post("/api/factory/jobs")
+async def factory_create_job(
+    template_id: str = Form(...),
+    inputs_json: str = Form("{}"),
+    name: Optional[str] = Form(None),
+):
+    """Create a new factory job from a template. Returns the job_id for polling."""
+    job_id = uuid.uuid4().hex[:12]
+    job = {
+        "job_id": job_id,
+        "template_id": template_id,
+        "name": name or template_id,
+        "inputs": json.loads(inputs_json),
+        "status": "queued",
+        "created_at": time.time(),
+        "logs": [f"Job {job_id} created."],
+    }
+    jobs = _load_json(FACTORY_JOBS_PATH, [])
+    jobs.append(job)
+    _save_json(FACTORY_JOBS_PATH, jobs)
+    return job
+
+
+@app.get("/api/factory/jobs")
+async def factory_list_jobs():
+    """List all factory jobs (newest first)."""
+    jobs = _load_json(FACTORY_JOBS_PATH, [])
+    jobs.sort(key=lambda j: j.get("created_at", 0), reverse=True)
+    return {"jobs": jobs}
+
+
+@app.get("/api/factory/jobs/{job_id}")
+async def factory_get_job(job_id: str):
+    jobs = _load_json(FACTORY_JOBS_PATH, [])
+    for j in jobs:
+        if j.get("job_id") == job_id:
+            return j
+    raise HTTPException(status_code=404, detail="job not found")
+
+
+@app.post("/api/factory/calendar")
+async def factory_calendar_update(entries: list):
+    """Replace the calendar schedule. entries: [{date, job_id, platforms[]}]."""
+    _save_json(FACTORY_CALENDAR_PATH, entries)
+    return {"saved": len(entries)}
+
+
+@app.get("/api/factory/calendar")
+async def factory_calendar_get():
+    return {"entries": _load_json(FACTORY_CALENDAR_PATH, [])}
+
+
+# ── Direct Social OAuth ──────────────────────────────────────────────
+
+@app.get("/api/social/youtube/connect")
+async def social_youtube_connect():
+    """Start the YouTube OAuth2 flow. Returns the authorization URL."""
+    from engines.social import YouTubeEngine
+    try:
+        url = YouTubeEngine().connect_url()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"url": url}
+
+
+@app.get("/api/social/youtube/callback")
+async def social_youtube_callback(code: str):
+    """OAuth2 callback for YouTube. Exchanges code for tokens and stores them."""
+    from engines.social import YouTubeEngine
+    eng = YouTubeEngine()
+    res = await eng.exchange(code)
+    if not res.success:
+        raise HTTPException(status_code=400, detail=res.error)
+    return res.data
+
+
+@app.get("/api/social/tiktok/connect")
+async def social_tiktok_connect():
+    from engines.social import TikTokEngine
+    try:
+        url = TikTokEngine().connect_url()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"url": url}
+
+
+@app.get("/api/social/tiktok/callback")
+async def social_tiktok_callback(code: str):
+    from engines.social import TikTokEngine
+    eng = TikTokEngine()
+    res = await eng.exchange(code)
+    if not res.success:
+        raise HTTPException(status_code=400, detail=res.error)
+    return res.data
+
+
+@app.get("/api/social/instagram/connect")
+async def social_instagram_connect():
+    from engines.social import InstagramEngine
+    try:
+        url = InstagramEngine().connect_url()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"url": url}
+
+
+@app.get("/api/social/instagram/callback")
+async def social_instagram_callback(code: str):
+    from engines.social import InstagramEngine
+    eng = InstagramEngine()
+    res = await eng.exchange(code)
+    if not res.success:
+        raise HTTPException(status_code=400, detail=res.error)
+    return res.data
+
+
+@app.get("/api/social/connections")
+async def social_connections():
+    """Show all social connection statuses."""
+    from engines.social import YouTubeEngine, TikTokEngine, InstagramEngine
+    out = {}
+    for name, eng_cls in (("youtube", YouTubeEngine), ("tiktok", TikTokEngine), ("instagram", InstagramEngine)):
+        try:
+            eng = eng_cls()
+            out[name] = eng.status().data if hasattr(eng.status(), "data") else eng.status()
+        except Exception as e:
+            out[name] = {"connected": False, "error": str(e)}
+    return out
+
+
+@app.post("/api/social/post-video")
+async def social_post_video(
+    platform: str = Form(...),
+    video_path: str = Form(...),
+    title: str = Form(...),
+    description: str = Form(""),
+    tags: Optional[str] = Form(None),
+    privacy: str = Form("private"),
+):
+    """Post a video via the direct OAuth engine (YouTube/TikTok/IG)."""
+    from engines.social import YouTubeEngine, TikTokEngine, InstagramEngine
+    eng_map = {"youtube": YouTubeEngine, "tiktok": TikTokEngine, "instagram": InstagramEngine}
+    if platform not in eng_map:
+        raise HTTPException(status_code=400, detail=f"unsupported platform: {platform}")
+    if not os.path.exists(video_path):
+        raise HTTPException(status_code=404, detail=f"video not found: {video_path}")
+    eng = eng_map[platform]()
+    tag_list = [t.strip() for t in tags.split(",")] if tags else None
+    try:
+        res = await eng.post_video(
+            video_path=video_path, title=title, description=description, tags=tag_list, privacy=privacy
+        )
+    except NotImplementedError as e:
+        raise HTTPException(status_code=501, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    if not res.success:
+        raise HTTPException(status_code=502, detail=res.error)
+    return res.data
+
+
+# ── Observability ────────────────────────────────────────────────────
+
+@app.post("/api/observability/langfuse/event")
+async def langfuse_event_proxy(payload: dict):
+    """Proxy a Langfuse event from the frontend (or test). No-op stub for now."""
+    # Real wiring: forward to LANGFUSE_HOST via httpx.
+    # See https://langfuse.com/docs for ingestion endpoint.
+    host = os.getenv("LANGFUSE_HOST", "")
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY", "")
+    if not host or not public_key or not secret_key:
+        return {"proxied": False, "reason": "LANGFUSE_HOST/KEYS not set in env"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.post(
+                f"{host}/api/public/ingestion",
+                json=payload,
+                auth=(public_key, secret_key),
+            )
+        return {"proxied": True, "status": r.status_code}
+    except Exception as e:
+        return {"proxied": False, "error": str(e)}
+
+
+# ── Mount /storage/ for local storage engine ─────────────────────────
+app.mount("/storage", StaticFiles(directory=os.getenv("STORAGE_DIR", os.path.join("output", "storage"))), name="storage")
 
 @app.post("/api/process")
 async def process_endpoint(

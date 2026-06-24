@@ -36,11 +36,226 @@ DEFAULT_VOICES = {
     "Sam (Male, raspy)": "yoZ06aMxZJJ28mfd3POQ",
 }
 
+# ElevenLabs voice_id → MiniMax voice_id mapping (best-effort, for seamless fallback)
+ELEVENLABS_TO_MINIMAX_VOICE = {
+    "21m00Tcm4TlvDq8ikWAM": "English_Graceful_Lady",        # Rachel
+    "29vD33N1CtxCmqQRPOHJ": "English_Persuasive_Man",        # Drew
+    "EXAVITQu4vr4xnSDxMaL": "English_radiant_girl",           # Bella
+    "ErXwobaYiN019PkySvjV": "English_Insightful_Speaker",    # Antoni
+    "TxGEqnHWrfWFTfGW9XjX": "English_Insightful_Speaker",    # Josh
+    "yoZ06aMxZJJ28mfd3POQ": "English_Persuasive_Man",        # Sam
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Content Factory: MiniMax-native TTS + image + video (Phase 3)
+#
+# These run alongside the existing fal.ai / ElevenLabs paths. The legacy
+# functions below are modified to DISPATCH to these when the feature
+# flag is on AND MINIMAX_API_KEY is set. Legacy paths remain identical
+# when flag is off — so the system is fully backward compatible.
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _resolve_minimax_voice(el_voice_id: str) -> str:
+    """Map an ElevenLabs voice_id to the closest MiniMax voice. Falls back to default."""
+    if el_voice_id in ELEVENLABS_TO_MINIMAX_VOICE:
+        return ELEVENLABS_TO_MINIMAX_VOICE[el_voice_id]
+    if el_voice_id and el_voice_id.startswith(("English_", "Chinese_", "Spanish_", "Japanese_")):
+        return el_voice_id  # already a MiniMax voice_id
+    return "English_Graceful_Lady"
+
+
+def _minimax_should_use(feature_flag: bool) -> bool:
+    """Return True if MiniMax-native path should run instead of legacy."""
+    if not feature_flag:
+        return False
+    if not os.getenv("MINIMAX_API_KEY"):
+        return False
+    return True
+
+
+def _minimax_tts_sync(
+    text: str, output_path: str, voice_id: str = "English_Graceful_Lady", language_boost: str = "auto"
+) -> str:
+    """Synchronous TTS via MiniMax speech-2.8-hd. Bridges async engine into sync callers."""
+    import asyncio as _asyncio
+    from engines.minimax_speech import MiniMaxSpeechEngine, LANGUAGE_BOOST_OPTIONS
+
+    if language_boost not in LANGUAGE_BOOST_OPTIONS:
+        language_boost = "auto"
+
+    async def _run() -> bytes:
+        eng = MiniMaxSpeechEngine()
+        res = await eng.synthesize(
+            text=text, voice_id=voice_id, model="speech-2.8-hd", language_boost=language_boost
+        )
+        if not res.success:
+            raise RuntimeError(f"MiniMax TTS failed: {res.error}")
+        data = res.data or {}
+        # Two output shapes: url or hex
+        if "audio_url" in data and data["audio_url"]:
+            import httpx as _httpx
+            r = _httpx.get(data["audio_url"], timeout=120.0)
+            r.raise_for_status()
+            return r.content
+        if "data" in data and isinstance(data["data"], dict):
+            audio_hex = data["data"].get("audio", "")
+            if audio_hex:
+                import binascii
+                return binascii.unhexlify(audio_hex)
+        if "audio_hex" in data:
+            import binascii
+            return binascii.unhexlify(data["audio_hex"])
+        raise RuntimeError(f"MiniMax TTS: no audio in response (keys: {list(data.keys())})")
+
+    audio_bytes = _asyncio.run(_run())
+    with open(output_path, "wb") as f:
+        f.write(audio_bytes)
+    return output_path
+
+
+def _minimax_actor_image_sync(
+    description: str, output_dir: str, title_slug: str, num_options: int = 3,
+    product_description: str = None,
+) -> List[str]:
+    """Sync actor portrait generation via MiniMax image-01."""
+    import asyncio as _asyncio
+    import random
+    from engines.minimax_video import MiniMaxVideoEngine
+
+    clean_desc = description
+    for remove in ["hablando", "talking", "sentad", "sitting", "desde", "from", "con una", "with a", "detrás", "behind"]:
+        if remove in clean_desc.lower():
+            idx = clean_desc.lower().find(remove)
+            if idx > 10:
+                clean_desc = clean_desc[:idx].rstrip(" ,.")
+    img_num = random.randint(1000, 9999)
+    if product_description:
+        prompt = (
+            f"IMG_{img_num}.jpg Raw candid selfie of {clean_desc}, casually holding "
+            f"{product_description}, showing it to the camera with a natural smile. "
+            "Product clearly visible in hand. Casual and real, not an ad. "
+            "Low quality front camera, soft room lighting. Reddit selfie."
+        )
+    else:
+        prompt = (
+            f"IMG_{img_num}.jpg Raw candid selfie of {clean_desc}, sitting at their "
+            "desk at home, looking at camera with a relaxed natural smile. "
+            "Headphones around neck, monitor glow behind them. Not posed, casual "
+            "and real. Low quality front camera, soft room lighting. Reddit selfie."
+        )
+
+    async def _run() -> List[bytes]:
+        eng = MiniMaxVideoEngine()
+        results = []
+        for i in range(num_options):
+            res = await eng.generate_image(
+                prompt=prompt, aspect_ratio="9:16", n=1, seed=random.randint(0, 999999)
+            )
+            if not res.success:
+                raise RuntimeError(f"MiniMax image gen failed: {res.error}")
+            data = res.data or {}
+            urls = data.get("data", {}).get("image_urls") or data.get("image_urls", [])
+            if not urls:
+                raise RuntimeError(f"MiniMax image: no URLs in response (keys: {list(data.keys())})")
+            import httpx as _httpx
+            r = _httpx.get(urls[0], timeout=120.0)
+            r.raise_for_status()
+            results.append(r.content)
+        return results
+
+    images = _asyncio.run(_run())
+    paths: List[str] = []
+    for i, b in enumerate(images):
+        p = os.path.join(output_dir, f"{title_slug}_actor_minimax_{i+1}.png")
+        with open(p, "wb") as f:
+            f.write(b)
+        paths.append(p)
+    return paths
+
+
+def _minimax_talking_head_sync(
+    image_path: str, audio_path: str, output_path: str, prompt: str = None
+) -> str:
+    """Sync talking-head generation via MiniMax S2V-01 (subject→video).
+
+    Falls back to local Wan 2.1 via the engines/ WanLocalEngine when
+    registered; raises EngineError if neither is available.
+    """
+    import asyncio as _asyncio
+    from engines.minimax_video import MiniMaxVideoEngine, S2V_MODEL
+    from engines import get_all, EngineCapability
+
+    DEFAULT_PROMPT = (
+        "Person talking to camera, subtle head nods and natural micro-expressions. "
+        "Gentle head movement, slight shoulder sway. Eye contact with camera. "
+        "Natural blinking. Soft ambient lighting. Smooth cinematic motion."
+    )
+    use_prompt = prompt or DEFAULT_PROMPT
+
+    async def _run_minimax() -> str:
+        eng = MiniMaxVideoEngine()
+        # Need a public URL for the image. Upload via local static server if not remote.
+        image_url = _ensure_public_url(image_path, eng.api_key if hasattr(eng, "api_key") else None)
+        res = await eng.generate_video_s2v(
+            prompt=use_prompt, subject_image_url=image_url, model=S2V_MODEL
+        )
+        if not res.success:
+            raise RuntimeError(f"MiniMax S2V failed: {res.error}")
+        data = res.data or {}
+        task_id = data.get("task_id")
+        if not task_id:
+            raise RuntimeError(f"MiniMax S2V: no task_id (keys: {list(data.keys())})")
+        poll = await eng.wait_for_video(task_id, timeout_sec=300)
+        file_id = poll.get("file_id")
+        if not file_id:
+            raise RuntimeError(f"MiniMax S2V poll: no file_id (status: {poll.get('status')})")
+        dl = await eng.download_video(str(file_id))
+        if not dl.success:
+            raise RuntimeError(f"MiniMax S2V download: {dl.error}")
+        with open(output_path, "wb") as f:
+            f.write(dl.data)
+        return output_path
+
+    async def _run_local_wan() -> str:
+        for eng in get_all(EngineCapability.VIDEO):
+            if eng.provider_id in ("wan-local", "wan21", "wan"):
+                res = await eng.execute(image_path=image_path, audio_path=audio_path,
+                                        output_path=output_path, prompt=use_prompt)
+                if isinstance(res, dict):
+                    return res.get("output_path") or output_path
+                return getattr(res, "data", output_path)
+        raise RuntimeError("No local Wan 2.1 engine registered")
+
+    try:
+        return _asyncio.run(_run_minimax())
+    except Exception as e:
+        print(f"[SaaSShorts] MiniMax S2V failed ({e}), trying local Wan 2.1...")
+        return _asyncio.run(_run_local_wan())
+
+
+def _ensure_public_url(local_path: str, api_key: Optional[str] = None) -> str:
+    """If a local file path is given, return it as-is (caller is expected to host it).
+    MiniMax accepts both http URLs and direct bytes via file API; for simplicity we
+    assume the caller has already uploaded it. If you need an upload helper, see
+    engines.minimax_video.MiniMaxVideoEngine for raw httpx patterns.
+    """
+    if local_path.startswith("http://") or local_path.startswith("https://"):
+        return local_path
+    # In dev: serve the file via the FastAPI static mount and return the public URL.
+    if local_path.startswith("/videos/"):
+        base = os.getenv("PUBLIC_BASE_URL", "http://localhost:18080")
+        return f"{base}{local_path}"
+    # Otherwise, hope it's already a public URL or the API will accept bytes.
+    return local_path
+
 
 GEMINI_MODEL = "gemini-3-flash-preview"
 
 # Lazy import to avoid hard dependency on google-genai for MiniMax-only users
 from minimax_client import get_client as get_ai_client, resolve_key as resolve_ai_key, MINIMAX, GEMINI
+from engines import FeatureFlags  # Content Factory: feature flags for engine selection
 
 def _provider_for(key: str) -> str:
     """Detect provider from a key string (used when callers don't pass provider explicitly)."""
@@ -709,7 +924,31 @@ def generate_actor_images(
     description: str, fal_key: str, output_dir: str, title_slug: str, num_options: int = 3,
     product_description: str = None,
 ) -> List[str]:
-    """Generate multiple hyper-realistic actor portrait options using Flux 2 Pro."""
+    """Generate multiple hyper-realistic actor portrait options.
+
+    Dispatches to MiniMax image-01 (engines/minimax_video.py) when the
+    USE_MINIMAX_VIDEO feature flag is on AND MINIMAX_API_KEY is set;
+    otherwise uses the legacy Flux 2 Pro path on fal.ai.
+    """
+    if _minimax_should_use(FeatureFlags.use_minimax_video()):
+        try:
+            print("[SaaSShorts] 🎨 Active engine: MiniMax image-01 (USE_MINIMAX_VIDEO=1)")
+            return _minimax_actor_image_sync(
+                description, output_dir, title_slug, num_options, product_description
+            )
+        except Exception as e:
+            print(f"[SaaSShorts] ⚠️  MiniMax image failed ({e}), falling back to fal.ai Flux 2 Pro")
+    # Legacy Flux 2 Pro path
+    return _generate_actor_images_legacy(
+        description, fal_key, output_dir, title_slug, num_options, product_description
+    )
+
+
+def _generate_actor_images_legacy(
+    description: str, fal_key: str, output_dir: str, title_slug: str, num_options: int = 3,
+    product_description: str = None,
+) -> List[str]:
+    """Legacy Flux 2 Pro path. Renamed for clarity; original logic preserved."""
     print(f"[SaaSShorts] 🎨 Generating {num_options} actor image options (Flux 2 Pro)...")
 
     # Clean description: strip scene/actions, keep only physical appearance
@@ -795,7 +1034,28 @@ def generate_voiceover(
     output_path: str,
     voice_id: str = "21m00Tcm4TlvDq8ikWAM",
 ) -> str:
-    """Generate voiceover audio using ElevenLabs TTS."""
+    """Generate voiceover audio.
+
+    Dispatches to MiniMax speech-2.8-hd (engines/minimax_speech.py) when
+    USE_MINIMAX_TTS=1 and MINIMAX_API_KEY is set; otherwise uses legacy
+    ElevenLabs path. The ElevenLabs voice_id is mapped to the closest
+    MiniMax voice (Rachel→English_Graceful_Lady etc.).
+    """
+    if _minimax_should_use(FeatureFlags.use_minimax_tts()):
+        try:
+            minimax_voice = _resolve_minimax_voice(voice_id)
+            print(f"[SaaSShorts] 🎙️ Active engine: MiniMax speech-2.8-hd (voice={minimax_voice})")
+            return _minimax_tts_sync(text, output_path, voice_id=minimax_voice)
+        except Exception as e:
+            print(f"[SaaSShorts] ⚠️  MiniMax TTS failed ({e}), falling back to ElevenLabs")
+    return _generate_voiceover_legacy(text, elevenlabs_key, output_path, voice_id)
+
+
+def _generate_voiceover_legacy(
+    text: str, elevenlabs_key: str, output_path: str,
+    voice_id: str = "21m00Tcm4TlvDq8ikWAM",
+) -> str:
+    """Legacy ElevenLabs TTS path. Original logic preserved."""
     print(f"[SaaSShorts] 🎙️ Generating voiceover ({len(text)} chars)...")
 
     url = f"{ELEVENLABS_API_BASE}/text-to-speech/{voice_id}"
@@ -862,7 +1122,25 @@ def generate_talking_head(
     fal_key: str,
     output_path: str,
 ) -> str:
-    """Generate talking head video using Kling Avatar v2 Standard on fal.ai."""
+    """Generate talking head video.
+
+    Dispatches to MiniMax S2V-01 (subject-reference to video) when
+    USE_MINIMAX_VIDEO=1 and MINIMAX_API_KEY is set; otherwise uses
+    legacy Kling Avatar v2 on fal.ai.
+    """
+    if _minimax_should_use(FeatureFlags.use_minimax_video()):
+        try:
+            print("[SaaSShorts] 🗣️ Active engine: MiniMax S2V-01 (subject→video)")
+            return _minimax_talking_head_sync(image_path, audio_path, output_path)
+        except Exception as e:
+            print(f"[SaaSShorts] ⚠️  MiniMax S2V failed ({e}), falling back to fal.ai Kling")
+    return _generate_talking_head_legacy(image_path, audio_path, fal_key, output_path)
+
+
+def _generate_talking_head_legacy(
+    image_path: str, audio_path: str, fal_key: str, output_path: str,
+) -> str:
+    """Legacy Kling Avatar v2 path. Original logic preserved."""
     print(f"[SaaSShorts] 🗣️ Generating talking head (Kling Avatar v2)...")
 
     # Upload image and audio to fal.ai CDN

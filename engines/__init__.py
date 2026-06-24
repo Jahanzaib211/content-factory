@@ -123,10 +123,37 @@ def _bootstrap() -> None:
     from .minimax_video import MiniMaxVideoEngine
     from .minimax_speech import MiniMaxSpeechEngine
     from .minimax_music import MiniMaxMusicEngine
+    from .stt import FasterWhisperLocalEngine, MiniMaxSttEngine
+    from .voice_clone import MiniMaxVoiceCloneEngine, CosyVoiceLocalEngine
+    from .storage import LocalStorageEngine, SeaweedFSEngine, S3StorageEngine
+    from .social import YouTubeEngine, TikTokEngine, InstagramEngine
+    from .llm import LiteLLMRouterEngine
 
-    register(MiniMaxVideoEngine())
-    register(MiniMaxSpeechEngine())
-    register(MiniMaxMusicEngine())
+    # Image / Video / Music
+    register(MiniMaxVideoEngine())            # IMAGE + VIDEO
+    register(MiniMaxMusicEngine())            # MUSIC
+
+    # TTS / Voice Clone
+    register(MiniMaxSpeechEngine())           # TTS
+    register(MiniMaxVoiceCloneEngine())       # VOICE_CLONE
+    register(CosyVoiceLocalEngine())          # VOICE_CLONE (local fallback)
+
+    # STT
+    register(FasterWhisperLocalEngine())      # STT (default, no key needed)
+    register(MiniMaxSttEngine())              # STT (placeholder until MiniMax exposes ASR)
+
+    # Storage
+    register(LocalStorageEngine())            # STORAGE (default)
+    register(SeaweedFSEngine())              # STORAGE (self-hosted S3)
+    register(S3StorageEngine())               # STORAGE (AWS legacy)
+
+    # Social
+    register(YouTubeEngine())                 # SOCIAL_POST
+    register(TikTokEngine())                  # SOCIAL_POST
+    register(InstagramEngine())               # SOCIAL_POST
+
+    # LLM router
+    register(LiteLLMRouterEngine())           # LLM (unified multi-provider)
 
 
 _bootstrapped = False
