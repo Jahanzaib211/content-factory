@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, FileVideo, Sparkles, Youtube, Instagram, Share2, LogOut, ChevronDown, Check, Activity, LayoutDashboard, Settings, PlusCircle, History, Menu, X, Terminal, Shield, LayoutGrid, Image, Globe, RotateCcw, Calendar, AlertTriangle, KeyRound, Bot, Users, Smartphone, ExternalLink, Copy, CheckCircle2, Mic, UserCircle, Languages, Layers, Trash2, Play, Pause, Volume2, Send } from 'lucide-react';
+import { Upload, FileVideo, Sparkles, Youtube, Instagram, Share2, LogOut, ChevronDown, Check, Activity, LayoutDashboard, Settings, PlusCircle, History, Menu, X, Terminal, Shield, LayoutGrid, Image, Globe, RotateCcw, Calendar, AlertTriangle, KeyRound, Bot, Users, Smartphone, ExternalLink, Copy, CheckCircle2, Mic, UserCircle, Languages, Layers, Trash2, Play, Pause, Volume2, Send, Type, FileText, Sparkle, Headphones, Mic2, Wand2, Loader2, Square, CheckCircle, RefreshCw, Plus, ChevronRight, Monitor, Zap } from 'lucide-react';
 import KeyInput, { MiniMaxKeyInput } from './components/KeyInput';
 import MediaInput from './components/MediaInput';
 import ResultCard from './components/ResultCard';
@@ -11,6 +11,7 @@ import UGCGallery from './components/UGCGallery';
 import ScheduleWeekModal from './components/ScheduleWeekModal';
 import { getApiUrl } from './config';
 import { I18nProvider, useT } from './i18n/I18nProvider';
+import { Skeleton, CardSkeleton, EngineStatusPill, EmptyState, StatCard, StepIndicator, toast } from './components/CFUI';
 
 // Enhanced "Encryption" using XOR + Base64 with a Salt
 // This is better than plain Base64 but still client-side.
@@ -151,13 +152,17 @@ function VoiceLabPanel() {
   const [name, setName] = useState('');
 
   const fetchLibrary = async () => {
+    setLoading(true);
     try {
       const r = await fetch(getApiUrl('/api/voice-lab/library'));
       const d = await r.json();
       setLibrary(d.voices || []);
-    } catch (_) {}
+    } catch (_) { setLibrary([]); }
+    finally { setLoading(false); }
   };
   useEffect(() => { fetchLibrary(); }, []);
+
+  const [loading, setLoading] = useState(true);
 
   const onUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -172,12 +177,12 @@ function VoiceLabPanel() {
       if (r.ok) {
         setName('');
         await fetchLibrary();
-        alert('Voice cloned! Now in your library.');
+        toast('Voice cloned! Now in your library.', 'success');
       } else {
         const e = await r.json().catch(() => ({}));
-        alert(`Clone failed: ${e.detail || r.statusText}`);
+        toast(`Clone failed: ${e.detail || r.statusText}`, 'error');
       }
-    } catch (err) { alert(`Clone failed: ${err.message}`); }
+    } catch (err) { toast(`Clone failed: ${err.message}`, 'error'); }
     finally { setUploading(false); }
   };
 
@@ -191,18 +196,19 @@ function VoiceLabPanel() {
       if (r.ok) {
         const blob = await r.blob();
         setTestAudio(URL.createObjectURL(blob));
+        toast('Voice test generated', 'success');
       } else {
         const e = await r.json().catch(() => ({}));
-        alert(`Test failed: ${e.detail || r.statusText}`);
+        toast(`Test failed: ${e.detail || r.statusText}`, 'error');
       }
-    } catch (err) { alert(`Test failed: ${err.message}`); }
+    } catch (err) { toast(`Test failed: ${err.message}`, 'error'); }
     finally { setTesting(false); }
   };
 
   const onDelete = async (voiceId) => {
     if (!confirm(`Delete voice ${voiceId}?`)) return;
     const r = await fetch(getApiUrl(`/api/voice-lab/${voiceId}`), { method: 'DELETE' });
-    if (r.ok) await fetchLibrary();
+    if (r.ok) { await fetchLibrary(); toast('Voice deleted', 'success'); }
   };
 
   return (
@@ -251,20 +257,47 @@ function VoiceLabPanel() {
       </div>
 
       <div className="glass-panel p-6">
-        <h2 className="text-lg font-semibold mb-4">Voice library ({library.length})</h2>
-        {library.length === 0 ? (
-          <p className="text-zinc-500 text-sm italic">No voices cloned yet.</p>
+        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          Voice library
+          <span className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-zinc-400 font-normal">{library.length}</span>
+        </h2>
+        {loading ? (
+          <div className="space-y-2">
+            <Skeleton w="w-full" h="h-12" />
+            <Skeleton w="w-5/6" h="h-12" />
+            <Skeleton w="w-4/6" h="h-12" />
+          </div>
+        ) : library.length === 0 ? (
+          <EmptyState
+            icon={Mic}
+            title="No voices cloned yet"
+            hint="Upload a 10-60 second audio sample above. Your voice will appear here and can be used in AI Shorts and translations."
+          />
         ) : (
           <div className="space-y-2">
             {library.map((v) => (
-              <div key={v.voice_id} className="flex items-center justify-between p-3 border border-white/5 rounded-lg">
-                <div>
-                  <p className="text-white font-medium">{v.name}</p>
-                  <p className="text-xs text-zinc-500">{v.engine} · {new Date(v.created_at * 1000).toLocaleString()}</p>
+              <div key={v.voice_id} className="flex items-center justify-between p-3 border border-white/5 rounded-lg hover:border-violet-500/30 transition-colors stagger-item">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-violet-500/10 flex items-center justify-center">
+                    <Volume2 size={16} className="text-violet-400" />
+                  </div>
+                  <div>
+                    <p className="text-white font-medium">{v.name}</p>
+                    <p className="text-xs text-zinc-500">{v.engine} · {new Date(v.created_at * 1000).toLocaleString()}</p>
+                  </div>
                 </div>
-                <button onClick={() => onDelete(v.voice_id)} className="text-zinc-400 hover:text-red-400 p-1">
-                  <Trash2 size={16} />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => onTest(v.voice_id)}
+                    className="text-zinc-400 hover:text-violet-400 p-1.5 hover:bg-violet-500/10 rounded transition-colors"
+                    title="Test synthesis"
+                  >
+                    <Play size={16} />
+                  </button>
+                  <button onClick={() => onDelete(v.voice_id)} className="text-zinc-400 hover:text-red-400 p-1.5 hover:bg-red-500/10 rounded transition-colors" title="Delete">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -296,8 +329,8 @@ function AvatarStudioPanel() {
       const r = await fetch(getApiUrl('/api/avatar-studio/portrait'), { method: 'POST', body: fd });
       const d = await r.json();
       if (r.ok) setImages(d.urls || []);
-      else alert(`Generate failed: ${d.detail || r.statusText}`);
-    } catch (err) { alert(`Generate failed: ${err.message}`); }
+      else toast(`Generate failed: ${d.detail || r.statusText}`, 'error');
+    } catch (err) { toast(`Generate failed: ${err.message}`, 'error'); }
     finally { setGenerating(false); }
   };
 
@@ -420,6 +453,7 @@ function AvatarStudioPanel() {
 
 function MultilingualPanel() {
   const [languages, setLanguages] = useState({});
+  const [loadingLangs, setLoadingLangs] = useState(true);
   const [videoPath, setVideoPath] = useState('');
   const [sourceLang, setSourceLang] = useState('');
   const [targetLang, setTargetLang] = useState('es');
@@ -427,11 +461,12 @@ function MultilingualPanel() {
   const [result, setResult] = useState(null);
 
   useEffect(() => {
-    fetch(getApiUrl('/api/multilingual/languages')).then((r) => r.json()).then((d) => setLanguages(d.languages || {})).catch(() => {});
+    setLoadingLangs(true);
+    fetch(getApiUrl('/api/multilingual/languages')).then((r) => r.json()).then((d) => setLanguages(d.languages || {})).catch(() => {}).finally(() => setLoadingLangs(false));
   }, []);
 
   const onTranslate = async () => {
-    if (!videoPath.trim()) return alert('Enter a video path or use one from your /videos/ directory.');
+    if (!videoPath.trim()) return toast('Enter a video path or use one from your /videos/ directory.', 'warn');
     setTranslating(true); setResult(null);
     try {
       const fd = new FormData();
@@ -441,8 +476,8 @@ function MultilingualPanel() {
       const r = await fetch(getApiUrl('/api/multilingual/translate'), { method: 'POST', body: fd });
       const d = await r.json();
       if (r.ok) setResult(d);
-      else alert(`Translate failed: ${d.detail || r.statusText}`);
-    } catch (err) { alert(`Translate failed: ${err.message}`); }
+      else toast(`Translate failed: ${d.detail || r.statusText}`, 'error');
+    } catch (err) { toast(`Translate failed: ${err.message}`, 'error'); }
     finally { setTranslating(false); }
   };
 
@@ -494,15 +529,26 @@ function MultilingualPanel() {
       )}
 
       <div className="glass-panel p-6 mt-6">
-        <h2 className="text-lg font-semibold mb-3">Supported languages ({Object.keys(languages).length})</h2>
+        <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+          Supported languages
+          <span className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-zinc-400 font-normal">{Object.keys(languages).length}</span>
+        </h2>
         <p className="text-xs text-zinc-500 mb-3">Powered by MiniMax TTS with language_boost + faster-whisper STT.</p>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs text-zinc-300">
-          {Object.entries(languages).map(([code, name]) => (
-            <div key={code} className="p-2 border border-white/5 rounded-lg">
-              <span className="text-emerald-400 font-mono">{code}</span> {name}
-            </div>
-          ))}
-        </div>
+        {loadingLangs ? (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <Skeleton key={i} w="w-full" h="h-7" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs text-zinc-300">
+            {Object.entries(languages).map(([code, name]) => (
+              <div key={code} className="p-2 border border-white/5 rounded-lg hover:border-emerald-500/30 transition-colors stagger-item">
+                <span className="text-emerald-400 font-mono">{code}</span> {name}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -514,8 +560,10 @@ function ContentFactoryPanel() {
   const [calendar, setCalendar] = useState([]);
   const [tab, setTab] = useState('templates');
   const [name, setName] = useState('');
+  const [loading, setLoading] = useState(true);
 
   const fetchAll = async () => {
+    setLoading(true);
     try {
       const [t, j, c] = await Promise.all([
         fetch(getApiUrl('/api/factory/templates')).then((r) => r.json()),
@@ -526,6 +574,7 @@ function ContentFactoryPanel() {
       setJobs(j.jobs || []);
       setCalendar(c.entries || []);
     } catch (_) {}
+    finally { setLoading(false); }
   };
   useEffect(() => { fetchAll(); }, []);
 
@@ -540,7 +589,7 @@ function ContentFactoryPanel() {
       await fetchAll();
       setTab('jobs');
     } else {
-      alert('Failed to create job');
+      toast('Failed to create job', 'error');
     }
   };
 
@@ -594,21 +643,35 @@ function ContentFactoryPanel() {
 
       {tab === 'jobs' && (
         <div className="glass-panel p-6">
-          {jobs.length === 0 ? (
-            <p className="text-zinc-500 text-sm italic">No jobs yet. Run a template to start.</p>
+          {loading ? (
+            <div className="space-y-2">
+              <Skeleton w="w-full" h="h-16" />
+              <Skeleton w="w-5/6" h="h-16" />
+              <Skeleton w="w-4/6" h="h-16" />
+            </div>
+          ) : jobs.length === 0 ? (
+            <EmptyState
+              icon={Layers}
+              title="No jobs yet"
+              hint="Pick a template above and click Run. Jobs appear here with live logs and status."
+            />
           ) : (
             <div className="space-y-2">
               {jobs.map((j) => (
-                <div key={j.job_id} className="p-3 border border-white/5 rounded-lg">
-                  <div className="flex items-center justify-between">
+                <div key={j.job_id} className="p-3 border border-white/5 rounded-lg hover:border-violet-500/30 transition-colors stagger-item">
+                  <div className="flex items-center justify-between mb-1">
                     <div>
                       <p className="text-white font-medium">{j.name}</p>
                       <p className="text-xs text-zinc-500">{j.template_id} · {new Date(j.created_at * 1000).toLocaleString()}</p>
                     </div>
-                    <span className="text-xs px-2 py-0.5 rounded bg-violet-500/10 text-violet-400">{j.status}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded uppercase tracking-wider ${
+                      j.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400' :
+                      j.status === 'failed' ? 'bg-red-500/10 text-red-400' :
+                      'bg-violet-500/10 text-violet-400'
+                    }`}>{j.status}</span>
                   </div>
                   {j.logs && j.logs.length > 0 && (
-                    <pre className="text-[10px] text-zinc-500 mt-2 whitespace-pre-wrap">{j.logs.join('\n')}</pre>
+                    <pre className="text-[10px] text-zinc-500 mt-2 whitespace-pre-wrap bg-black/30 p-2 rounded">{j.logs.join('\n')}</pre>
                   )}
                 </div>
               ))}
@@ -660,8 +723,8 @@ function SocialConnectRow({ platform, label, env, devUrl }) {
       if (d.url) {
         window.open(d.url, '_blank', 'noopener,noreferrer');
         setTimeout(fetchStatus, 5000);
-      } else alert(d.detail || 'No URL returned');
-    } catch (err) { alert(err.message); }
+      } else toast(d.detail || 'No URL returned', 'error');
+    } catch (err) { toast(err.message, 'error'); }
     finally { setConnecting(false); }
   };
   const connected = status?.connected;
@@ -735,7 +798,7 @@ function EnginePicker({ enginesByCap, enginesHealth, onRefresh }) {
 }
 
 function App() {
-  const t = useT();
+  const { t } = useT();
   const [apiKey, setApiKey] = useState(localStorage.getItem('gemini_key') || '');
   const [minimaxKey, setMinimaxKey] = useState(() => {
     const stored = localStorage.getItem('minimax_key_v1');
@@ -1489,24 +1552,29 @@ function App() {
                   providers become registered.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {Object.keys(enginesByCap).filter((c) => enginesByCap[c] && enginesByCap[c].length > 0).length === 0 && (
-                    <div className="text-xs text-zinc-500 italic">Loading engine registry…</div>
-                  )}
-                  {Object.entries(enginesByCap).flatMap(([cap, providers]) =>
-                    providers.map((p) => {
-                      const health = enginesHealth[cap];
-                      const healthy = health && health.healthy;
-                      const missingKey = health && !health.healthy && health.detail && /not set|missing key/i.test(health.detail);
-                      const color = healthy ? 'text-green-400' : missingKey ? 'text-amber-400' : 'text-red-400';
-                      const dot = healthy ? 'bg-green-400' : missingKey ? 'bg-amber-400' : 'bg-red-400';
-                      return (
-                        <div key={`${cap}:${p.provider_id}`} className="flex items-center gap-2 p-2 border border-white/5 rounded-lg">
-                          <span className={`w-2 h-2 rounded-full ${dot}`} />
-                          <span className={`text-xs ${color} capitalize`}>{cap}</span>
-                          <span className="text-xs text-zinc-300 truncate">{p.display_name}</span>
-                        </div>
-                      );
-                    })
+                  {Object.keys(enginesByCap).filter((c) => enginesByCap[c] && enginesByCap[c].length > 0).length === 0 ? (
+                    <div className="col-span-2 space-y-2">
+                      {Array.from({ length: 4 }).map((_, i) => (
+                        <Skeleton key={i} w="w-full" h="h-10" />
+                      ))}
+                    </div>
+                  ) : (
+                    Object.entries(enginesByCap).flatMap(([cap, providers]) =>
+                      providers.map((p) => {
+                        const health = enginesHealth[cap];
+                        const healthy = health && health.healthy;
+                        const missingKey = health && !health.healthy && health.detail && /not set|missing key/i.test(health.detail);
+                        const color = healthy ? 'text-emerald-400' : missingKey ? 'text-amber-400' : 'text-red-400';
+                        const dot = healthy ? 'bg-emerald-400 engine-dot-healthy' : missingKey ? 'bg-amber-400' : 'bg-red-400';
+                        return (
+                          <div key={`${cap}:${p.provider_id}`} className="flex items-center gap-2 p-2 border border-white/5 rounded-lg hover:border-white/10 transition-colors">
+                            <span className={`w-2 h-2 rounded-full ${dot}`} />
+                            <span className={`text-xs ${color} capitalize font-medium`}>{cap}</span>
+                            <span className="text-xs text-zinc-300 truncate">{p.display_name}</span>
+                          </div>
+                        );
+                      })
+                    )
                   )}
                 </div>
                 <button
