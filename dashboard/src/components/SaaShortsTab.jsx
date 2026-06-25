@@ -44,9 +44,9 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
   // Step 0: URL input
   const [url, setUrl] = useState(() => loadCache()?.url || '');
   const [videoMode, setVideoMode] = useState(() => {
-    // Auto-detect free mode when no API keys are set
-    if (!falKey && !elevenLabsKey) return 'free';
-    return 'lowcost';
+    // Auto-detect: free unless fal.ai key is available (needed for lowcost/premium talking head)
+    if (falKey) return 'lowcost';
+    return 'free';
   }); // "free", "lowcost" or "premium"
   const [description, setDescription] = useState('');
   const [style, setStyle] = useState('ugc');
@@ -303,8 +303,10 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
   };
 
   const handleGenerate = async () => {
-    // API keys are optional now — free engines (edge-tts, LocalDiffusion, FFmpeg) work without keys
-    // If keys are missing, backend will use free fallback chain automatically
+    // Auto-downgrade to free if required keys are missing
+    if ((videoMode === 'lowcost' || videoMode === 'premium') && !falKey) {
+      setVideoMode('free');
+    }
 
     setGenerating(true);
     setGenLogs(['Starting video generation...']);
