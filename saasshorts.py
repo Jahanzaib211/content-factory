@@ -1090,14 +1090,107 @@ def _generate_actor_images_legacy(
 def generate_actor_image(
     description: str, fal_key: str, output_path: str
 ) -> str:
-    """Generate a single actor image using Recraft V4."""
+    """Generate a single actor image with fallback chain.
+
+    Priority: MiniMax image-01 → Flux 2 Pro (fal.ai) → LocalDiffusion (free).
+    """
     output_dir = os.path.dirname(output_path)
     title_slug = os.path.basename(output_path).replace("_actor.png", "")
-    paths = generate_actor_images(description, fal_key, output_dir, title_slug, num_options=1)
-    if paths:
-        import shutil
-        shutil.move(paths[0], output_path)
+
+    # 1. Try MiniMax image-01
+    if _minimax_should_use(FeatureFlags.use_minimax_video()):
+        try:
+            print("[SaaSShorts] 🎨 Active engine: MiniMax image-01")
+            paths = _minimax_actor_image_sync(description, output_dir, title_slug, num_options=1)
+            if paths:
+                import shutil
+                shutil.move(paths[0], output_path)
+                return output_path
+        except Exception as e:
+            print(f"[SaaSShorts] ⚠️  MiniMax image failed ({e}), trying Flux 2 Pro...")
+
+    # 2. Try Flux 2 Pro via fal.ai
+    if fal_key:
+        try:
+            paths = generate_actor_images(description, fal_key, output_dir, title_slug, num_options=1)
+            if paths:
+                import shutil
+                shutil.move(paths[0], output_path)
+                return output_path
+        except Exception as e:
+            print(f"[SaaSShorts] ⚠️  Flux 2 Pro failed ({e}), falling back to LocalDiffusion (free)")
+
+    # 3. Free fallback: LocalDiffusion (SDXL, runs locally)
+    return _generate_actor_image_local(description, output_path)
+
+
+def _generate_actor_image_local(description: str, output_path: str) -> str:
+    """Generate actor image using local Stable Diffusion (free, no API key)."""
+    print(f"[SaaSShorts] 🎨 Generating actor image with LocalDiffusion (free, local)...")
+
+    try:
+        from engines.local_image import LocalDiffusionEngine
+        engine = LocalDiffusionEngine()
+        prompt = f"Raw candid selfie of {description}, looking at camera with a relaxed natural smile. Casual and real, not an ad. Soft room lighting."
+        result = engine.generate(prompt=prompt, output_path=output_path, width=512, height=768)
+        if result.success and result.data:
+            actual_path = result.data.get("image_path", output_path)
+            if actual_path != output_path:
+                import shutil
+                shutil.move(actual_path, output_path)
+            print(f"[SaaSShorts] ✅ Actor image (LocalDiffusion, free): {output_path}")
+            return output_path
+    except Exception as e:
+        print(f"[SaaSShorts] ⚠️  LocalDiffusion failed ({e}), trying ComfyUI...")
+
+    # Fallback: ComfyUI
+    try:
+        from engines.local_image import ComfyUIEngine
+        engine = ComfyUIEngine()
+        prompt = f"Raw candid selfie of {description}, looking at camera with a relaxed natural smile. Casual and real. Soft room lighting."
+        result = engine.generate(prompt=prompt, output_path=output_path, width=512, height=768)
+        if result.success and result.data:
+            actual_path = result.data.get("image_path", output_path)
+            if actual_path != output_path:
+                import shutil
+                shutil.move(actual_path, output_path)
+            print(f"[SaaSShorts] ✅ Actor image (ComfyUI, free): {output_path}")
+            return output_path
+    except Exception as e:
+        print(f"[SaaSShorts] ⚠️  ComfyUI also failed ({e})")
+
+    # Last resort: generate a placeholder
+    print("[SaaSShorts] ⚠️  All image engines failed. Creating placeholder.")
+    _create_placeholder_image(output_path, description)
     return output_path
+
+
+def _create_placeholder_image(output_path: str, text: str = "") -> None:
+    """Create a simple placeholder image using FFmpeg when no image engine works."""
+    # Use a solid color with text overlay as placeholder
+    safe_text = text[:60].replace("'", " ").replace(":", " ") if text else "Actor"
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", f"color=c=#1a1a2e:s=512x768:d=1",
+        "-vf", f"drawtext=text='{safe_text}':fontcolor=white:fontsize=24:x=(w-tw)/2:y=(h-th)/2",
+        "-frames:v", "1",
+        output_path,
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, timeout=10)
+    except Exception:
+        # Absolute fallback: 1x1 pixel PNG
+        import struct, zlib
+        def _png(w, h, r, g, b):
+            def chunk(ctype, data):
+                c = ctype + data
+                return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+            raw = b''
+            for _ in range(h):
+                raw += b'\x00' + bytes([r, g, b]) * w
+            return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
+        with open(output_path, 'wb') as f:
+            f.write(_png(512, 768, 26, 26, 46))
 
 
 def generate_voiceover(
@@ -1106,21 +1199,79 @@ def generate_voiceover(
     output_path: str,
     voice_id: str = "21m00Tcm4TlvDq8ikWAM",
 ) -> str:
-    """Generate voiceover audio.
+    """Generate voiceover audio with multi-engine fallback chain.
 
-    Dispatches to MiniMax speech-2.8-hd (engines/minimax_speech.py) when
-    USE_MINIMAX_TTS=1 and MINIMAX_API_KEY is set; otherwise uses legacy
-    ElevenLabs path. The ElevenLabs voice_id is mapped to the closest
-    MiniMax voice (Rachel→English_Graceful_Lady etc.).
+    Priority: MiniMax speech-2.8-hd → ElevenLabs → edge-tts (free).
     """
+    # 1. Try MiniMax speech-2.8-hd
     if _minimax_should_use(FeatureFlags.use_minimax_tts()):
         try:
             minimax_voice = _resolve_minimax_voice(voice_id)
             print(f"[SaaSShorts] 🎙️ Active engine: MiniMax speech-2.8-hd (voice={minimax_voice})")
             return _minimax_tts_sync(text, output_path, voice_id=minimax_voice)
         except Exception as e:
-            print(f"[SaaSShorts] ⚠️  MiniMax TTS failed ({e}), falling back to ElevenLabs")
-    return _generate_voiceover_legacy(text, elevenlabs_key, output_path, voice_id)
+            print(f"[SaaSShorts] ⚠️  MiniMax TTS failed ({e}), trying ElevenLabs...")
+
+    # 2. Try ElevenLabs
+    if elevenlabs_key:
+        try:
+            return _generate_voiceover_legacy(text, elevenlabs_key, output_path, voice_id)
+        except Exception as e:
+            print(f"[SaaSShorts] ⚠️  ElevenLabs failed ({e}), falling back to edge-tts (free)")
+
+    # 3. Free fallback: edge-tts (400+ voices, no key needed)
+    return _generate_voiceover_edge_tts(text, output_path, voice_id)
+
+
+def _generate_voiceover_edge_tts(text: str, output_path: str, voice_id: str = "21m00Tcm4TlvDq8ikWAM") -> str:
+    """Free TTS via edge-tts (Microsoft Edge neural voices). No API key needed."""
+    import asyncio
+    print(f"[SaaSShorts] 🎙️ Generating voiceover with edge-tts (free, {len(text)} chars)...")
+
+    # Map ElevenLabs voice IDs to edge-tts voice names
+    EDGE_VOICE_MAP = {
+        "21m00Tcm4TlvDq8ikWAM": "en-US-AriaNeural",      # Rachel → Aria
+        "29vD33N1CtxCmqQRPOHJ": "en-US-GuyNeural",        # Drew → Guy
+        "EXAVITQu4vr4xnSDxMaL": "en-US-JennyNeural",      # Bella → Jenny
+        "ErXwobaYiN019PkySvjV": "en-US-DavisNeural",      # Antoni → Davis
+        "TxGEqnHWrfWFTfGW9XjX": "en-US-AndrewNeural",    # Josh → Andrew
+        "yoZ06aMxZJJ28mfd3POQ": "en-US-BrandonNeural",   # Sam → Brandon
+    }
+    edge_voice = EDGE_VOICE_MAP.get(voice_id, "en-US-AriaNeural")
+
+    # Check if edge-tts is available
+    try:
+        from engines.edge_tts import EdgeTTSEngine
+        engine = EdgeTTSEngine()
+
+        async def _synthesize():
+            return await engine.synthesize(text, voice=edge_voice, output_path=output_path)
+
+        result = _run_async(_synthesize())
+
+        if result.success and result.data:
+            actual_path = result.data.get("audio_path", output_path)
+            # edge-tts outputs MP3; move to requested path if different
+            if actual_path != output_path:
+                import shutil
+                shutil.move(actual_path, output_path)
+            print(f"[SaaSShorts] ✅ Voiceover (edge-tts, free): {output_path}")
+            return output_path
+        else:
+            raise Exception(f"edge-tts failed: {result.error}")
+
+    except ImportError:
+        # Fallback: call edge-tts CLI directly
+        print("[SaaSShorts]   Using edge-tts CLI fallback...")
+        cmd = [
+            "edge-tts",
+            "--voice", edge_voice,
+            "--text", text,
+            "--write-media", output_path,
+        ]
+        subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+        print(f"[SaaSShorts] ✅ Voiceover (edge-tts CLI, free): {output_path}")
+        return output_path
 
 
 def _generate_voiceover_legacy(
@@ -1194,19 +1345,76 @@ def generate_talking_head(
     fal_key: str,
     output_path: str,
 ) -> str:
-    """Generate talking head video.
+    """Generate talking head video with multi-engine fallback chain.
 
-    Dispatches to MiniMax S2V-01 (subject-reference to video) when
-    USE_MINIMAX_VIDEO=1 and MINIMAX_API_KEY is set; otherwise uses
-    legacy Kling Avatar v2 on fal.ai.
+    Priority: MiniMax S2V-01 → Kling Avatar v2 (fal.ai) → FFmpeg Ken Burns (free).
     """
+    # 1. Try MiniMax S2V-01
     if _minimax_should_use(FeatureFlags.use_minimax_video()):
         try:
             print("[SaaSShorts] 🗣️ Active engine: MiniMax S2V-01 (subject→video)")
             return _minimax_talking_head_sync(image_path, audio_path, output_path)
         except Exception as e:
-            print(f"[SaaSShorts] ⚠️  MiniMax S2V failed ({e}), falling back to fal.ai Kling")
-    return _generate_talking_head_legacy(image_path, audio_path, fal_key, output_path)
+            print(f"[SaaSShorts] ⚠️  MiniMax S2V failed ({e}), trying Kling Avatar...")
+
+    # 2. Try Kling Avatar v2 via fal.ai
+    if fal_key:
+        try:
+            return _generate_talking_head_legacy(image_path, audio_path, fal_key, output_path)
+        except Exception as e:
+            print(f"[SaaSShorts] ⚠️  Kling Avatar failed ({e}), falling back to FFmpeg Ken Burns (free)")
+
+    # 3. Free fallback: FFmpeg Ken Burns effect synced with audio
+    return _generate_talking_head_free(image_path, audio_path, output_path)
+
+
+def _generate_talking_head_free(
+    image_path: str, audio_path: str, output_path: str,
+) -> str:
+    """Generate talking head video using FFmpeg Ken Burns effect (free, local).
+
+    Creates a dynamic video from a static image with subtle zoom/pan animation
+    synced to the audio duration. Not AI-generated, but functional as a fallback.
+    """
+    print(f"[SaaSShorts] 🗣️ Generating talking head (FFmpeg Ken Burns, free)...")
+
+    # Get audio duration
+    audio_duration = _get_media_duration(audio_path)
+    if audio_duration <= 0:
+        audio_duration = 10.0  # fallback
+    dur_secs = max(int(audio_duration) + 1, 5)  # at least 5s
+
+    fps = 30
+    total_frames = dur_secs * fps
+
+    # Ken Burns: slow zoom in from 1.0x to 1.12x with slight upward pan
+    zoompan_filter = (
+        f"scale=2160:3840,"  # upscale to 4K for quality
+        f"zoompan=z='1+0.12*on/{total_frames}':"
+        f"x='iw/2-(iw/zoom/2)':"
+        f"y='ih/2-(ih/zoom/2)-5*on/{total_frames}':"
+        f"d={total_frames}:s=1080x1920:fps={fps},"
+        f"setsar=1"
+    )
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-loop", "1", "-i", image_path,                    # Input 0: actor image
+        "-i", audio_path,                                   # Input 1: voiceover audio
+        "-vf", zoompan_filter,
+        "-t", str(dur_secs),
+        "-map", "0:v", "-map", "1:a",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "128k",
+        "-shortest",
+        output_path,
+    ]
+
+    subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+
+    print(f"[SaaSShorts] ✅ Talking head (Ken Burns, free): {output_path} ({dur_secs}s)")
+    return output_path
 
 
 def _generate_talking_head_legacy(
@@ -1254,9 +1462,13 @@ def generate_talking_head_lowcost(
     output_path: str,
 ) -> str:
     """
-    Low-cost talking head: Hailuo 2.3 Fast img2video → VEED Lipsync.
-    ~$0.39 vs ~$1.69 for Kling Avatar v2.
+    Low-cost talking head with free fallback.
+    Priority: Hailuo 2.3 + VEED Lipsync (fal.ai) → FFmpeg Ken Burns (free).
     """
+    if not fal_key:
+        print("[SaaSShorts] 🗣️ No fal.ai key, using FFmpeg Ken Burns (free)...")
+        return _generate_talking_head_free(image_path, audio_path, output_path)
+
     print(f"[SaaSShorts] 🗣️ Generating talking head (Low Cost: Hailuo + VEED Lipsync)...")
 
     # Step 1: Generate 6s video from image using MiniMax Hailuo 2.3 Fast ($0.19)
@@ -1333,41 +1545,89 @@ def generate_talking_head_lowcost(
 def generate_broll(
     prompt: str, fal_key: str, output_path: str, duration: str = "5"
 ) -> str:
-    """
-    Generate b-roll: Recraft V4 image + Ken Burns zoom effect via FFmpeg.
-    """
-    print(f"[SaaSShorts] 🎬 Generating b-roll image + Ken Burns effect...")
+    """Generate b-roll with fallback chain.
 
+    Priority: Flux 2 Pro (fal.ai) → LocalDiffusion/ComfyUI (free) → solid color placeholder.
+    All paths use FFmpeg Ken Burns for the zoom effect.
+    """
     dur_secs = int(duration)
     img_path = output_path.replace(".mp4", "_img.png")
 
-    # Step 1: Generate a high-quality still image with Flux 2 Pro
-    result = _fal_run(
-        "fal-ai/flux-2-pro",
-        {
-            "prompt": f"{prompt}. Cinematic, shallow depth of field, professional photography.",
-            "image_size": "portrait_4_3",
-            "safety_tolerance": 5,
-        },
-        fal_key,
-        timeout=300,
-    )
+    img_generated = False
 
-    # Flux 2 Pro returns images in "images" or "output" key
-    images = result.get("images") or result.get("output", [])
-    if not images:
-        raise Exception(f"No images in b-roll result: {list(result.keys())}")
-    img_url = images[0]["url"] if isinstance(images[0], dict) else images[0]
+    # 1. Try Flux 2 Pro via fal.ai
+    if fal_key:
+        try:
+            print(f"[SaaSShorts] 🎬 Generating b-roll image (Flux 2 Pro)...")
+            result = _fal_run(
+                "fal-ai/flux-2-pro",
+                {
+                    "prompt": f"{prompt}. Cinematic, shallow depth of field, professional photography.",
+                    "image_size": "portrait_4_3",
+                    "safety_tolerance": 5,
+                },
+                fal_key,
+                timeout=300,
+            )
+            images = result.get("images") or result.get("output", [])
+            if images:
+                img_url = images[0]["url"] if isinstance(images[0], dict) else images[0]
+                with httpx.Client(timeout=60.0) as client:
+                    img_resp = client.get(img_url)
+                    with open(img_path, "wb") as f:
+                        f.write(img_resp.content)
+                img_generated = True
+        except Exception as e:
+            print(f"[SaaSShorts] ⚠️  Flux 2 Pro failed ({e}), trying LocalDiffusion...")
 
-    with httpx.Client(timeout=60.0) as client:
-        img_resp = client.get(img_url)
-        with open(img_path, "wb") as f:
-            f.write(img_resp.content)
+    # 2. Try LocalDiffusion (free, local)
+    if not img_generated:
+        try:
+            print(f"[SaaSShorts] 🎬 Generating b-roll image (LocalDiffusion, free)...")
+            from engines.local_image import LocalDiffusionEngine
+            engine = LocalDiffusionEngine()
+            result = engine.generate(
+                prompt=f"{prompt}. Cinematic, shallow depth of field, professional photography.",
+                output_path=img_path,
+                width=512,
+                height=768,
+            )
+            if result.success and result.data:
+                actual_path = result.data.get("image_path", img_path)
+                if actual_path != img_path:
+                    import shutil
+                    shutil.move(actual_path, img_path)
+                img_generated = True
+        except Exception as e:
+            print(f"[SaaSShorts] ⚠️  LocalDiffusion failed ({e}), trying ComfyUI...")
 
-    # Step 2: Ken Burns effect — slow zoom in with slight pan
+    # 3. Try ComfyUI (free, local)
+    if not img_generated:
+        try:
+            from engines.local_image import ComfyUIEngine
+            engine = ComfyUIEngine()
+            result = engine.generate(
+                prompt=f"{prompt}. Cinematic, shallow depth of field, professional photography.",
+                output_path=img_path,
+                width=512,
+                height=768,
+            )
+            if result.success and result.data:
+                actual_path = result.data.get("image_path", img_path)
+                if actual_path != img_path:
+                    import shutil
+                    shutil.move(actual_path, img_path)
+                img_generated = True
+        except Exception as e:
+            print(f"[SaaSShorts] ⚠️  ComfyUI failed ({e}), creating solid color placeholder")
+
+    # 4. Last resort: solid color placeholder
+    if not img_generated:
+        _create_broll_placeholder(img_path, prompt)
+
+    # Ken Burns zoom effect (same for all image sources)
     fps = 30
     total_frames = dur_secs * fps
-    # Zoom from 1.0x to 1.15x over duration (subtle, cinematic)
     zoompan_filter = (
         f"scale=2160:3840,"
         f"zoompan=z='1+0.15*on/{total_frames}':"
@@ -1378,8 +1638,8 @@ def generate_broll(
     )
     cmd = [
         "ffmpeg", "-y",
-        "-loop", "1", "-i", img_path,          # Input 0: image
-        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",  # Input 1: silent audio
+        "-loop", "1", "-i", img_path,
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
         "-vf", zoompan_filter,
         "-t", str(dur_secs),
         "-map", "0:v", "-map", "1:a",
@@ -1389,7 +1649,6 @@ def generate_broll(
         "-shortest",
         output_path,
     ]
-
     subprocess.run(cmd, check=True, capture_output=True)
 
     # Cleanup temp image
@@ -1398,6 +1657,34 @@ def generate_broll(
 
     print(f"[SaaSShorts] ✅ B-roll (Ken Burns): {output_path}")
     return output_path
+
+
+def _create_broll_placeholder(img_path: str, prompt: str) -> None:
+    """Create a gradient placeholder image for b-roll."""
+    # Dark gradient with prompt text
+    safe_text = prompt[:50].replace("'", " ").replace(":", " ") if prompt else "B-Roll"
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", "color=c=#0f0f23:s=1080x1440:d=1",
+        "-vf", f"drawtext=text='{safe_text}':fontcolor=white:fontsize=20:x=(w-tw)/2:y=(h-th)/2",
+        "-frames:v", "1",
+        img_path,
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, timeout=10)
+    except Exception:
+        # Absolute fallback
+        import struct, zlib
+        def _png(w, h, r, g, b):
+            def chunk(ctype, data):
+                c = ctype + data
+                return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+            raw = b''
+            for _ in range(h):
+                raw += b'\x00' + bytes([r, g, b]) * w
+            return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
+        with open(img_path, 'wb') as f:
+            f.write(_png(1080, 1440, 15, 15, 35))
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1830,24 +2117,39 @@ def generate_full_video(
 
     # Cost estimate
     audio_duration = _get_media_duration(audio_path)
-    if video_mode == "lowcost":
+    has_fal = bool(fal_key)
+    has_elevenlabs = bool(elevenlabs_key)
+
+    if not has_fal and not has_elevenlabs:
+        # Zero-cost mode: all free engines
         cost = {
-            "actor_image_flux": 0.05,
-            "voiceover_elevenlabs": round(len(full_narration) * 0.00003, 3),
-            "hailuo_img2video": 0.19,
-            "veed_lipsync": 0.20,
-            "broll_flux": round(len(broll_clips) * 0.05, 2),
+            "actor_image": 0.00,
+            "voiceover_edge_tts": 0.00,
+            "talking_head_ffmpeg": 0.00,
+            "broll_local": 0.00,
+            "subtitles_whisper": 0.00,
+            "ffmpeg_compositing": 0.00,
+            "total": 0.00,
+            "mode": "free",
+        }
+    elif video_mode == "lowcost":
+        cost = {
+            "actor_image_flux": 0.05 if has_fal else 0.00,
+            "voiceover": round(len(full_narration) * 0.00003, 3) if has_elevenlabs else 0.00,
+            "hailuo_img2video": 0.19 if has_fal else 0.00,
+            "veed_lipsync": 0.20 if has_fal else 0.00,
+            "broll_flux": round(len(broll_clips) * 0.05, 2) if has_fal else 0.00,
             "ffmpeg_compositing": 0.00,
         }
     else:
         cost = {
-            "actor_image_flux": 0.05,
-            "voiceover_elevenlabs": round(len(full_narration) * 0.00003, 3),
-            "talking_head_kling": round(audio_duration * 0.056, 2),
-            "broll_kling": round(len(broll_clips) * 5 * 0.07, 2),
+            "actor_image_flux": 0.05 if has_fal else 0.00,
+            "voiceover": round(len(full_narration) * 0.00003, 3) if has_elevenlabs else 0.00,
+            "talking_head_kling": round(audio_duration * 0.056, 2) if has_fal else 0.00,
+            "broll_kling": round(len(broll_clips) * 5 * 0.07, 2) if has_fal else 0.00,
             "ffmpeg_compositing": 0.00,
         }
-    cost["total"] = round(sum(cost.values()), 2)
+    cost["total"] = round(sum(v for k, v in cost.items() if k != "total" and k != "mode"), 2)
 
     return {
         "video_path": final_path,

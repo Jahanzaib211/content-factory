@@ -251,14 +251,8 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
   };
 
   const handleGenerate = async () => {
-    if (!falKey) {
-      alert('fal.ai API key required. Set it in Settings.');
-      return;
-    }
-    if (!elevenLabsKey) {
-      alert('ElevenLabs API key required. Set it in Settings.');
-      return;
-    }
+    // API keys are optional now — free engines (edge-tts, LocalDiffusion, FFmpeg) work without keys
+    // If keys are missing, backend will use free fallback chain automatically
 
     setGenerating(true);
     setGenLogs(['Starting video generation...']);
@@ -1183,7 +1177,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
                 ) : !selectedActor ? (
                   <><User size={14} /> Select an actor first</>
                 ) : (
-                  <><Film size={14} /> Generate Video (~${videoMode === 'lowcost' ? '0.65' : '2.50'})</>
+                  <><Film size={14} /> Generate Video {!falKey && !elevenLabsKey ? '(Free)' : `(~$${videoMode === 'lowcost' ? '0.65' : '2.50'})`}</>
                 )}
               </button>
             </div>

@@ -3011,14 +3011,16 @@ async def saasshorts_generate(
     x_fal_key: Optional[str] = Header(None, alias="X-Fal-Key"),
     x_elevenlabs_key: Optional[str] = Header(None, alias="X-ElevenLabs-Key"),
 ):
-    """Generate a SaaS UGC video from a script. Returns a job_id for polling."""
-    fal_key = x_fal_key
-    elevenlabs_key = x_elevenlabs_key
+    """Generate a SaaS UGC video from a script. Returns a job_id for polling.
 
-    if not fal_key:
-        raise HTTPException(status_code=400, detail="Missing fal.ai API Key (X-Fal-Key header)")
-    if not elevenlabs_key:
-        raise HTTPException(status_code=400, detail="Missing ElevenLabs API Key (X-ElevenLabs-Key header)")
+    API keys are optional — free engines (edge-tts, LocalDiffusion, FFmpeg) work without them.
+    """
+    fal_key = x_fal_key or ""
+    elevenlabs_key = x_elevenlabs_key or ""
+
+    if not fal_key and not elevenlabs_key:
+        log_msg("ℹ️ No API keys provided — using free engine fallback chain (edge-tts, LocalDiffusion, FFmpeg)")
+
 
     # Support retry: reuse output_dir so cached assets (image, voice, head, broll) are kept
     reused = False
