@@ -128,19 +128,21 @@ def _bootstrap() -> None:
     from .storage import LocalStorageEngine, SeaweedFSEngine, S3StorageEngine
     from .social import YouTubeEngine, TikTokEngine, InstagramEngine
     from .llm import LiteLLMRouterEngine
+    from .edge_tts import EdgeTTSEngine
 
     # Image / Video / Music
     register(MiniMaxVideoEngine())            # IMAGE + VIDEO
     register(MiniMaxMusicEngine())            # MUSIC
 
     # TTS / Voice Clone
-    register(MiniMaxSpeechEngine())           # TTS
+    register(MiniMaxSpeechEngine())           # TTS (primary, cloud)
+    register(EdgeTTSEngine())                 # TTS (free fallback, 400+ voices)
     register(MiniMaxVoiceCloneEngine())       # VOICE_CLONE
     register(CosyVoiceLocalEngine())          # VOICE_CLONE (local fallback)
 
     # STT
     register(FasterWhisperLocalEngine())      # STT (default, no key needed)
-    register(MiniMaxSttEngine())              # STT (placeholder until MiniMax exposes ASR)
+    register(MiniMaxSttEngine())              # STT (cloud fallback)
 
     # Storage
     register(LocalStorageEngine())            # STORAGE (default)

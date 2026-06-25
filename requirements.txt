@@ -21,3 +21,22 @@ python-multipart==0.0.27
 httpx==0.28.1
 Pillow==12.2.0
 beautifulsoup4==4.14.3
+
+# LLM routing (replaces direct minimax_client calls)
+litellm
+
+# Free TTS fallback (Microsoft Edge TTS, 400+ voices)
+edge-tts
+
+# Trend research (Google Trends)
+pytrends
+
+# Video editing (wraps FFmpeg with Python API)
+mcp-video
+
+# Audio processing
+pydub
+soundfile
+
+# Image processing
+opencv-python-headless
