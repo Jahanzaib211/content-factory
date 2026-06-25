@@ -3014,11 +3014,12 @@ async def saasshorts_voices(
     try:
         from engines.edge_tts import EdgeTTSEngine
         engine = EdgeTTSEngine()
-        voices = await engine.list_voices(language=language, gender=gender)
+        result = await engine.list_voices(language=language, gender=gender)
+        voices = result.data if result.success else []
         presets = engine.get_preset_voices()
         return {"voices": voices[:100], "presets": presets, "total": len(voices)}
     except Exception as e:
-        log.error(f"Voice list failed: {e}")
+        print(f"[SaaSShorts] Voice list failed: {e}")
         raise HTTPException(500, f"Voice list failed: {e}")
 
 
@@ -3054,7 +3055,7 @@ async def saasshorts_voice_preview(req: VoicePreviewRequest):
             rate=req.rate,
             pitch=req.pitch,
         )
-        audio_path = result.get("audio_path", "")
+        audio_path = result.data.get("audio_path", "") if result.success else ""
         if audio_path and os.path.exists(audio_path):
             import uuid
             preview_name = f"preview_{uuid.uuid4().hex[:8]}.mp3"
@@ -3065,14 +3066,14 @@ async def saasshorts_voice_preview(req: VoicePreviewRequest):
             shutil.copy2(audio_path, dest)
             return {
                 "audio_url": f"/output/previews/{preview_name}",
-                "duration_ms": result.get("duration_ms", 0),
+                "duration_ms": result.data.get("duration_ms", 0),
                 "voice": req.voice,
             }
         raise HTTPException(500, "Voice synthesis failed")
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Voice preview failed: {e}")
+        print(f"[SaaSShorts] Voice preview failed: {e}")
         raise HTTPException(500, f"Voice preview failed: {e}")
 
 
@@ -3090,7 +3091,7 @@ async def saasshorts_generate(
     elevenlabs_key = x_elevenlabs_key or ""
 
     if not fal_key and not elevenlabs_key:
-        log_msg("ℹ️ No API keys provided — using free engine fallback chain (edge-tts, LocalDiffusion, FFmpeg)")
+        print("[SaaSShorts] ℹ️ No API keys provided — using free engine fallback chain")
 
 
     # Support retry: reuse output_dir so cached assets (image, voice, head, broll) are kept
@@ -3306,7 +3307,7 @@ async def gallery_list(
         from dataclasses import asdict
         return {"items": [asdict(i) for i in items], "total": len(store.list_items())}
     except Exception as e:
-        log.error(f"Gallery list failed: {e}")
+        print(f"[SaaSShorts] Gallery list failed: {e}")
         return {"items": [], "total": 0, "error": str(e)}
 
 
@@ -3671,7 +3672,7 @@ async def research_trends(niche: str = "", timeframe: str = "today 1-month", geo
         topics = await scanner.get_trending_topics(niche, timeframe, geo)
         return {"trends": [{"title": t.title, "traffic_level": t.traffic_level, "search_volume": t.search_volume, "related_queries": t.related_queries, "source": t.source, "score": t.score} for t in topics]}
     except Exception as e:
-        log.error(f"Research trends failed: {e}")
+        print(f"[SaaSShorts] Research trends failed: {e}")
         return {"trends": [], "error": str(e)}
 
 
@@ -3693,7 +3694,7 @@ async def research_keywords(q: str = ""):
             "related_keywords": result.related_keywords,
         }
     except Exception as e:
-        log.error(f"Research keywords failed: {e}")
+        print(f"[SaaSShorts] Research keywords failed: {e}")
         raise HTTPException(500, f"Keyword research failed: {e}")
 
 
@@ -3707,7 +3708,7 @@ async def research_score(topic: str = ""):
         scorer = SEOScorer()
         return await scorer.score_topic(topic)
     except Exception as e:
-        log.error(f"Research score failed: {e}")
+        print(f"[SaaSShorts] Research score failed: {e}")
         raise HTTPException(500, f"SEO scoring failed: {e}")
 
 
@@ -3724,7 +3725,7 @@ async def research_ideas(body: Dict[str, Any] = {}):
         )
         return {"ideas": [{"title": i.title, "hook": i.hook, "description": i.description, "tags": i.tags, "estimated_views": i.estimated_views, "score": i.score, "source_trend": i.source_trend} for i in ideas]}
     except Exception as e:
-        log.error(f"Research ideas failed: {e}")
+        print(f"[SaaSShorts] Research ideas failed: {e}")
         return {"ideas": [], "error": str(e)}
 
 
@@ -3740,7 +3741,7 @@ async def analytics_dashboard():
         engine = AnalyticsEngine()
         return engine.get_dashboard_data()
     except Exception as e:
-        log.error(f"Analytics dashboard failed: {e}")
+        print(f"[SaaSShorts] Analytics dashboard failed: {e}")
         return {"summary": {"total_videos": 0, "total_views": 0, "total_likes": 0, "avg_score": 0}, "top_videos": [], "channels": [], "platforms": {"youtube": False, "tiktok": False, "instagram": False}, "error": str(e)}
 
 
@@ -3759,7 +3760,7 @@ async def analytics_video(platform: str, video_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Analytics video failed: {e}")
+        print(f"[SaaSShorts] Analytics video failed: {e}")
         raise HTTPException(500, f"Analytics fetch failed: {e}")
 
 
@@ -3780,7 +3781,7 @@ async def analytics_channel(platform: str, channel_id: str = ""):
         store = AnalyticsStore()
         return {"channels": store.get_channel_metrics(platform)}
     except Exception as e:
-        log.error(f"Analytics channel failed: {e}")
+        print(f"[SaaSShorts] Analytics channel failed: {e}")
         return {"channels": [], "error": str(e)}
 
 
@@ -3797,7 +3798,7 @@ async def scheduler_best_times(platform: str = "youtube", count: int = 5, timezo
         slots = await opt.get_best_times(platform, count, timezone)
         return {"times": [{"platform": s.platform, "day": s.day_of_week, "hour": s.hour, "timezone": s.timezone, "confidence": s.confidence, "reason": s.reason} for s in slots]}
     except Exception as e:
-        log.error(f"Scheduler best-times failed: {e}")
+        print(f"[SaaSShorts] Scheduler best-times failed: {e}")
         return {"times": [], "error": str(e)}
 
 
@@ -3820,7 +3821,7 @@ async def scheduler_create_recurring(body: Dict[str, Any] = {}):
         from dataclasses import asdict
         return asdict(schedule)
     except Exception as e:
-        log.error(f"Scheduler create failed: {e}")
+        print(f"[SaaSShorts] Scheduler create failed: {e}")
         raise HTTPException(500, f"Schedule creation failed: {e}")
 
 
@@ -3833,7 +3834,7 @@ async def scheduler_list_recurring():
         from dataclasses import asdict
         return {"schedules": [asdict(s) for s in sched.list_schedules()]}
     except Exception as e:
-        log.error(f"Scheduler list failed: {e}")
+        print(f"[SaaSShorts] Scheduler list failed: {e}")
         return {"schedules": [], "error": str(e)}
 
 
@@ -3850,7 +3851,7 @@ async def scheduler_delete_recurring(schedule_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Scheduler delete failed: {e}")
+        print(f"[SaaSShorts] Scheduler delete failed: {e}")
         raise HTTPException(500, f"Schedule deletion failed: {e}")
 
 
@@ -3870,7 +3871,7 @@ def scheduler_crop(body: Dict[str, Any] = {}):
         cropper.crop_for_platform(video_path, platform, output_path)
         return {"output_path": output_path, "platform": platform, "size": os.path.getsize(output_path)}
     except Exception as e:
-        log.error(f"Scheduler crop failed: {e}")
+        print(f"[SaaSShorts] Scheduler crop failed: {e}")
         raise HTTPException(500, f"Crop failed: {e}")
 
 
@@ -3888,5 +3889,5 @@ def scheduler_crop_all(body: Dict[str, Any] = {}):
         results = cropper.crop_for_all_platforms(video_path, output_dir)
         return {"results": results, "output_dir": output_dir}
     except Exception as e:
-        log.error(f"Scheduler crop-all failed: {e}")
+        print(f"[SaaSShorts] Scheduler crop-all failed: {e}")
         raise HTTPException(500, f"Crop-all failed: {e}")

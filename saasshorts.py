@@ -1198,11 +1198,18 @@ def generate_voiceover(
     elevenlabs_key: str,
     output_path: str,
     voice_id: str = "21m00Tcm4TlvDq8ikWAM",
+    video_mode: str = "lowcost",
 ) -> str:
     """Generate voiceover audio with multi-engine fallback chain.
 
     Priority: MiniMax speech-2.8-hd → ElevenLabs → edge-tts (free).
+    In free mode, skips directly to edge-tts.
     """
+    # Free mode: skip straight to edge-tts
+    if video_mode == "free":
+        print(f"[SaaSShorts] 🎙️ Free mode — using edge-tts directly")
+        return _generate_voiceover_edge_tts(text, output_path, voice_id)
+
     # 1. Try MiniMax speech-2.8-hd
     if _minimax_should_use(FeatureFlags.use_minimax_tts()):
         try:
@@ -1249,7 +1256,7 @@ def _generate_voiceover_edge_tts(text: str, output_path: str, voice_id: str = "2
         engine = EdgeTTSEngine()
 
         async def _synthesize():
-            return await engine.synthesize(text, voice=edge_voice, output_path=output_path)
+            return await engine.synthesize(text, voice=edge_voice, output=output_path)
 
         result = _run_async(_synthesize())
 
@@ -2035,6 +2042,7 @@ def generate_full_video(
     fal_key = config["fal_key"]
     elevenlabs_key = config["elevenlabs_key"]
     voice_id = config.get("voice_id", "21m00Tcm4TlvDq8ikWAM")
+    video_mode = config.get("video_mode", "lowcost")
     actor_desc = config.get("actor_description") or script.get("actor_description", "a young professional in their late 20s, wearing a casual modern outfit, clean background")
 
     title_slug = re.sub(r"[^a-z0-9]+", "_", script.get("title", "video").lower())[:30]
@@ -2077,7 +2085,7 @@ def generate_full_video(
         with ThreadPoolExecutor(max_workers=2) as executor:
             future_img = executor.submit(generate_actor_image, actor_desc, fal_key, actor_img) if need_img else None
             future_voice = executor.submit(
-                generate_voiceover, full_narration, elevenlabs_key, audio_path, voice_id
+                generate_voiceover, full_narration, elevenlabs_key, audio_path, voice_id, video_mode
             ) if need_voice else None
 
             if future_img:
@@ -2091,9 +2099,11 @@ def generate_full_video(
         log("[2/6] ✅ Using cached assets.")
 
     # ── Step 3: Generate talking head ──
-    video_mode = config.get("video_mode", "premium")
     if not _exists(talking_head):
-        if video_mode == "lowcost":
+        if video_mode == "free":
+            log("[3/6] Generating talking head (FFmpeg Ken Burns, free)...")
+            talking_head = _generate_talking_head_free(actor_img, audio_path, talking_head)
+        elif video_mode == "lowcost":
             log("[3/6] Generating talking head (Low Cost: Hailuo + VEED Lipsync)... This takes 2-5 minutes.")
             talking_head = generate_talking_head_lowcost(actor_img, audio_path, fal_key, talking_head)
         else:
@@ -2126,12 +2136,14 @@ def generate_full_video(
                 broll_to_generate.append((i, seg, broll_path))
 
         if broll_to_generate:
-            log(f"[4/6] Generating {len(broll_to_generate)} b-roll clips...")
+            log(f"[4/6] Generating {len(broll_to_generate)} b-roll clips{'(free)' if video_mode == 'free' else ''}...")
             with ThreadPoolExecutor(max_workers=3) as executor:
                 futures = {}
                 for i, seg, broll_path in broll_to_generate:
                     future = executor.submit(
-                        generate_broll, seg["broll_prompt"], fal_key, broll_path
+                        generate_broll, seg["broll_prompt"],
+                        "" if video_mode == "free" else fal_key,
+                        broll_path,
                     )
                     futures[future] = {"seg": seg, "path": broll_path}
 
