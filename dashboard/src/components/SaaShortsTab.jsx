@@ -474,6 +474,26 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
         {/* ── Step 0: URL Input ────────────────────────────────── */}
         {step === 0 && (
           <div className="animate-[fadeIn_0.3s_ease-out] space-y-6">
+            {/* Zero-config banner */}
+            {!geminiApiKey && !minimaxApiKey && !falKey && !elevenLabsKey && (
+              <div className="glass-panel p-4 border border-emerald-500/20 bg-emerald-500/5">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                    <Zap size={16} className="text-emerald-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-emerald-300">Zero-Config Mode Active</h3>
+                    <p className="text-xs text-zinc-400 mt-0.5">
+                      No API keys set — you're running <strong className="text-emerald-400">100% free</strong>. 
+                      edge-tts for voice, LocalDiffusion for images, FFmpeg for video. 
+                      Enter a URL or description below and hit Analyze to get started.
+                    </p>
+                    <p className="text-[10px] text-zinc-600 mt-1">Script analysis requires a Gemini or MiniMax key. Video generation is free.</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="glass-panel p-8 space-y-6">
               {/* Video Mode Selector */}
               <div>
@@ -1340,6 +1360,17 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
                   {genStatus.toUpperCase()}
                 </span>
               </div>
+
+              {/* Time estimate */}
+              {genStatus === 'processing' && (
+                <div className="flex items-center justify-end text-[10px] text-zinc-600 mb-1 px-1">
+                  <span>
+                    {videoMode === 'free'
+                      ? '~2-4 min (free engines)'
+                      : '~3-6 min (API calls)'}
+                  </span>
+                </div>
+              )}
 
               {/* Progress steps */}
               <div className="space-y-2 mb-4">
