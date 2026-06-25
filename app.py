@@ -2591,6 +2591,23 @@ async def saasshorts_analyze(
                 }
 
             scripts = generate_scripts(analysis, gemini_key, req.num_scripts, req.style, req.language, req.actor_gender)
+
+            # Score each script's topic/hook with SEOScorer
+            try:
+                import asyncio as _asyncio
+                from engines.research import SEOScorer
+                seo = SEOScorer()
+                for script in scripts:
+                    topic = script.get("title", "") or script.get("hook_text", "")
+                    if topic:
+                        scored = _asyncio.run(seo.score_topic(topic))
+                        script["seo_score"] = scored.get("score", 0)
+                        script["seo_breakdown"] = scored.get("breakdown", {})
+                        script["seo_recommendation"] = scored.get("recommendation", "")
+                print(f"[SaaSShorts] ✅ SEO scored {len(scripts)} scripts")
+            except Exception as e:
+                print(f"[SaaSShorts] ⚠️  SEO scoring failed (non-fatal): {e}")
+
             return {
                 "analysis": analysis,
                 "scripts": scripts,

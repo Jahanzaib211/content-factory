@@ -129,10 +129,20 @@ def _bootstrap() -> None:
     from .social import YouTubeEngine, TikTokEngine, InstagramEngine
     from .llm import LiteLLMRouterEngine
     from .edge_tts import EdgeTTSEngine
+    from .cv import MediaPipeFaceEngine, SceneDetectEngine, YOLOObjectEngine
+    from .local_image import ComfyUIEngine, LocalDiffusionEngine
+    from .lip_sync import Wav2LipEngine, MuseTalkEngine
+    from .local_music import AudioCraftEngine, RiffusionEngine
+    from .translation import TranslationEngine, ArgosTranslateEngine
+    from .diarize import PyannoteDiarizeEngine
 
     # Image / Video / Music
-    register(MiniMaxVideoEngine())            # IMAGE + VIDEO
-    register(MiniMaxMusicEngine())            # MUSIC
+    register(MiniMaxVideoEngine())            # IMAGE + VIDEO (primary, cloud)
+    register(ComfyUIEngine())                 # IMAGE (local, free)
+    register(LocalDiffusionEngine())          # IMAGE (local, free)
+    register(MiniMaxMusicEngine())            # MUSIC (primary, cloud)
+    register(AudioCraftEngine())              # MUSIC (local, free)
+    register(RiffusionEngine())               # MUSIC (local, free)
 
     # TTS / Voice Clone
     register(MiniMaxSpeechEngine())           # TTS (primary, cloud)
@@ -143,6 +153,22 @@ def _bootstrap() -> None:
     # STT
     register(FasterWhisperLocalEngine())      # STT (default, no key needed)
     register(MiniMaxSttEngine())              # STT (cloud fallback)
+
+    # Computer Vision (free, local)
+    register(MediaPipeFaceEngine())           # FACE_DETECT
+    register(SceneDetectEngine())             # SCENE_DETECT
+    register(YOLOObjectEngine())              # OBJECT_TRACK
+
+    # Lip Sync
+    register(Wav2LipEngine())                 # LIP_SYNC (local, free)
+    register(MuseTalkEngine())                # LIP_SYNC (self-hosted)
+
+    # Translation
+    register(TranslationEngine())             # TRANSLATION (cloud)
+    register(ArgosTranslateEngine())          # TRANSLATION (local, free)
+
+    # Speaker Diarization
+    register(PyannoteDiarizeEngine())         # SPEAKER_DIARIZE (local, free)
 
     # Storage
     register(LocalStorageEngine())            # STORAGE (default)

@@ -256,6 +256,22 @@ GEMINI_MODEL = "gemini-3-flash-preview"
 # Lazy import to avoid hard dependency on google-genai for MiniMax-only users
 from minimax_client import get_client as get_ai_client, resolve_key as resolve_ai_key, MINIMAX, GEMINI
 from engines import FeatureFlags  # Content Factory: feature flags for engine selection
+from engines.research import TrendScanner, KeywordResearch, SEOScorer
+
+
+def _run_async(coro):
+    """Bridge async engine calls into the sync saasshorts pipeline."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                return pool.submit(asyncio.run, coro).result()
+        return loop.run_until_complete(coro)
+    except RuntimeError:
+        return asyncio.run(coro)
+
 
 def _provider_for(key: str) -> str:
     """Detect provider from a key string (used when callers don't pass provider explicitly)."""
@@ -391,6 +407,35 @@ Be thorough. Use REAL data from your search results, not made-up information."""
         research = {"raw_research": text, "product_name": domain}
 
     research["grounding_sources"] = sources
+
+    # Engine enrichment: TrendScanner + KeywordResearch
+    try:
+        trend_scanner = TrendScanner()
+        keyword_researcher = KeywordResearch()
+        product_niche = research.get("what_it_does", domain)
+        trend_topics = _run_async(trend_scanner.get_trending_topics(product_niche))
+        keyword_result = _run_async(keyword_researcher.research_keyword(domain))
+        research["trend_data"] = [
+            {"title": t.title, "traffic_level": t.traffic_level,
+             "search_volume": t.search_volume, "score": t.score,
+             "related_queries": t.related_queries}
+            for t in (trend_topics or [])
+        ]
+        research["keyword_data"] = {
+            "keyword": keyword_result.keyword,
+            "search_volume": keyword_result.search_volume,
+            "competition": keyword_result.competition,
+            "score": keyword_result.score,
+            "trend_direction": keyword_result.trend_direction,
+            "related_keywords": keyword_result.related_keywords,
+        }
+        print(f"[SaaSShorts] ✅ Trend data: {len(research['trend_data'])} topics, "
+              f"keyword score: {keyword_result.score}")
+    except Exception as e:
+        print(f"[SaaSShorts] ⚠️  Engine research enrichment failed (non-fatal): {e}")
+        research["trend_data"] = []
+        research["keyword_data"] = {}
+
     print(f"[SaaSShorts] ✅ Web research complete: {len(sources)} sources found")
     return research
 
@@ -528,6 +573,12 @@ Key differentiators:
 
 Content angles found online:
 {json.dumps(web_research.get('content_angles_from_web', []), indent=2)}
+
+Google Trends data:
+{json.dumps(web_research.get('trend_data', [])[:10], indent=2)}
+
+Keyword research:
+{json.dumps(web_research.get('keyword_data', {}), indent=2)}
 """
 
     prompt = f"""You are an expert SaaS marketing analyst and UGC content strategist. Analyze this SaaS product for creating viral UGC-style marketing videos.
@@ -610,6 +661,11 @@ Include 5-8 pain points, 4-6 emotional hooks, and 4+ viral angles."""
     if web_research and web_research.get("grounding_sources"):
         analysis["_web_sources"] = web_research["grounding_sources"]
 
+    # Pass trend/keyword data through to script generation
+    if web_research:
+        analysis["_trend_data"] = web_research.get("trend_data", [])
+        analysis["_keyword_data"] = web_research.get("keyword_data", {})
+
     print(f"[SaaSShorts] ✅ Analysis: {analysis.get('product_name', '?')} ({len(analysis.get('pain_points', []))} pain points)")
     return analysis
 
@@ -654,11 +710,27 @@ Use natural casual American English like a real person on TikTok. Contractions, 
 Examples of English UGC hooks: "Okay so I just found this tool and...", "Stop doing this manually, there's a better way", "I can't believe nobody told me about this sooner..."
 """
 
+    # Build keyword/trend context for script generation
+    keyword_context = ""
+    trend_data = analysis.get("_trend_data", [])
+    keyword_data = analysis.get("_keyword_data", {})
+    if trend_data or keyword_data:
+        keyword_context = f"""KEYWORD & TREND DATA (use for hashtags, hooks, SEO):
+Top trends: {json.dumps([t['title'] for t in trend_data[:5]])}
+Related keywords: {json.dumps(keyword_data.get('related_keywords', [])[:8])}
+Search volume: {keyword_data.get('search_volume', 'N/A')}
+Competition: {keyword_data.get('competition', 'N/A')}
+Trend direction: {keyword_data.get('trend_direction', 'N/A')}
+Use trending keywords naturally in hooks and hashtags.
+"""
+
     prompt = f"""You are a viral short-form video scriptwriter for TikTok/Instagram Reels.
 Generate {num_scripts} video scripts to promote this product/business.
 {lang_instructions}
 PRODUCT ANALYSIS:
 {json.dumps(analysis, indent=2)}
+
+{keyword_context}
 
 STYLE: {style_guide.get(style, style_guide['ugc'])}
 
