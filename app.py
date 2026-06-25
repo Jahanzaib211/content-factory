@@ -3150,13 +3150,19 @@ async def saasshorts_generate(
             if os.path.exists(src):
                 selected_actor_path = src
 
+    # Auto-downgrade: lowcost/premium need fal.ai for talking head
+    effective_mode = req.video_mode
+    if effective_mode in ("lowcost", "premium") and not fal_key:
+        print(f"[SaaSShorts] ℹ️ No fal.ai key — auto-downgrading from {effective_mode} to free")
+        effective_mode = "free"
+
     config = {
         "fal_key": fal_key,
         "elevenlabs_key": elevenlabs_key,
         "voice_id": req.voice_id or "21m00Tcm4TlvDq8ikWAM",
         "actor_description": req.actor_description,
         "selected_actor_path": selected_actor_path,
-        "video_mode": req.video_mode,
+        "video_mode": effective_mode,
     }
 
     async def run_generation():
