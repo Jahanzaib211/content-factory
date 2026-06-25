@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Globe, Sparkles, Download, Copy, Check, ChevronRight, ChevronLeft, Loader2, AlertCircle, Volume2, User, Film, Terminal, ChevronDown, RefreshCw, Zap, Target, TrendingUp, MessageSquare, Eye, Share2, Calendar, Upload } from 'lucide-react';
+import { Globe, Sparkles, Download, Copy, Check, CheckCircle2, ChevronRight, ChevronLeft, Loader2, AlertCircle, Volume2, User, Film, Terminal, ChevronDown, RefreshCw, Zap, Target, TrendingUp, MessageSquare, Eye, Share2, Calendar, Upload } from 'lucide-react';
 import { getApiUrl } from '../config';
 
 const STYLE_OPTIONS = [
@@ -1022,10 +1022,13 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
                       {edgeVoices
                         .filter(v => !edgeVoiceFilter || v.voice_id.toLowerCase().includes(edgeVoiceFilter.toLowerCase()) || v.language?.toLowerCase().includes(edgeVoiceFilter.toLowerCase()))
                         .map((v) => (
-                          <button
+                          <div
                             key={v.voice_id}
+                            role="button"
+                            tabIndex={0}
                             onClick={() => setSelectedEdgeVoice(v.voice_id)}
-                            className={`w-full flex items-center gap-3 p-2 rounded-lg border text-left transition-all ${
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedEdgeVoice(v.voice_id); }}}
+                            className={`w-full flex items-center gap-3 p-2 rounded-lg border text-left transition-all cursor-pointer ${
                               selectedEdgeVoice === v.voice_id
                                 ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'
                                 : 'border-white/10 bg-white/5 text-zinc-400 hover:bg-white/10'
@@ -1036,6 +1039,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
                               <div className="text-[10px] text-zinc-500">{v.language} · {v.gender}</div>
                             </div>
                             <button
+                              type="button"
                               onClick={(e) => { e.stopPropagation(); previewEdgeVoice(v.voice_id); }}
                               className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition-colors ${
                                 previewingVoice === v.voice_id
@@ -1047,7 +1051,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
                               <Volume2 size={11} />
                             </button>
                             {selectedEdgeVoice === v.voice_id && <Check size={12} className="text-emerald-400 shrink-0" />}
-                          </button>
+                          </div>
                         ))}
                     </div>
                     <p className="text-[10px] text-zinc-600">
