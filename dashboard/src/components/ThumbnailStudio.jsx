@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Upload, Image, Loader2, Send, Check, Download, ArrowRight, ArrowLeft, Sparkles, Video, Type, X, Plus, MessageSquare, FileText, Youtube, AlertCircle, CheckCircle2, Settings } from 'lucide-react';
+import { Upload, Image, Loader2, Send, Check, Download, ArrowRight, ArrowLeft, Sparkles, Video, Type, X, Plus, MessageSquare, FileText, Youtube, AlertCircle, CheckCircle2, Settings, AlertTriangle } from 'lucide-react';
 import { getApiUrl } from '../config';
 
 const STEPS = ['Input', 'Titles', 'Generate', 'Description', 'Publish'];
@@ -47,12 +47,15 @@ function DragDropZone({ label, accept, onFile, file, onClear, icon: _Icon }) {
     setIsDragging(true);
   }, []);
 
+  const objectUrl = React.useMemo(() => file ? URL.createObjectURL(file) : '', [file]);
+  React.useEffect(() => () => { if (objectUrl) URL.revokeObjectURL(objectUrl); }, [objectUrl]);
+
   if (file) {
     return (
       <div className="relative border border-white/10 rounded-xl p-3 bg-white/5">
         <div className="flex items-center gap-3">
           {file.type?.startsWith('image/') ? (
-            <img src={URL.createObjectURL(file)} className="w-12 h-12 rounded-lg object-cover" alt="" />
+            <img src={objectUrl} className="w-12 h-12 rounded-lg object-cover" alt="" />
           ) : (
             <div className="w-12 h-12 rounded-lg bg-white/10 flex items-center justify-center">
               <Icon size={20} className="text-zinc-400" />
@@ -157,7 +160,7 @@ export default function ThumbnailStudio({ geminiApiKey, minimaxApiKey, uploadPos
         setPreprocessSessionId(data.session_id);
         console.log(`🎙️ Background Whisper started: ${data.session_id}`);
       }
-    } catch (_) {
+    } catch (e) {
       console.error('Pre-upload failed:', e);
     } finally {
       setIsPreprocessing(false);
@@ -198,10 +201,10 @@ export default function ThumbnailStudio({ geminiApiKey, minimaxApiKey, uploadPos
       setRecommended(data.recommended || []);
       setChatHistory([{
         role: 'assistant',
-        content: `Here are 10 viral title suggestions based on your video. Titles marked ⭐ are my top picks. Click one to select it, or tell me how to refine them.`
+        content: `Here are viral title suggestions based on your video. Titles marked ⭐ are my top picks. Click one to select it, or tell me how to refine them.`
       }]);
       setStep(1);
-    } catch (_) {
+    } catch (e) {
       alert(`Analysis failed: ${e.message}`);
     } finally {
       setIsAnalyzing(false);
@@ -264,7 +267,7 @@ export default function ThumbnailStudio({ geminiApiKey, minimaxApiKey, uploadPos
         content: `Here are refined titles based on your feedback. Click one to select it.`
       }]);
       setTimeout(scrollToBottom, 100);
-    } catch (_) {
+    } catch (e) {
       setChatHistory(prev => [...prev, {
         role: 'assistant',
         content: `Failed to refine: ${e.message}`
@@ -308,7 +311,7 @@ export default function ThumbnailStudio({ geminiApiKey, minimaxApiKey, uploadPos
         throw new Error('No thumbnails were generated. Your Gemini API key may not have access to image generation.');
       }
       setGeneratedThumbnails(data.thumbnails);
-    } catch (_) {
+    } catch (e) {
       alert(`Generation failed: ${e.message}`);
     } finally {
       setIsGenerating(false);
@@ -358,7 +361,7 @@ export default function ThumbnailStudio({ geminiApiKey, minimaxApiKey, uploadPos
 
       const data = await res.json();
       setDescription(data.description || '');
-    } catch (_) {
+    } catch (e) {
       alert(`Description generation failed: ${e.message}`);
     } finally {
       setIsDescribing(false);
@@ -414,14 +417,14 @@ export default function ThumbnailStudio({ geminiApiKey, minimaxApiKey, uploadPos
               reject(new Error(statusData.error || 'Upload failed'));
             }
             // 'uploading' → keep polling
-          } catch (_) {
+          } catch (e) {
             clearInterval(interval);
             reject(e);
           }
         }, 2000);
       });
 
-    } catch (_) {
+    } catch (e) {
       setPublishResult({ success: false, error: e.message });
     } finally {
       setIsPublishing(false);
@@ -464,7 +467,7 @@ export default function ThumbnailStudio({ geminiApiKey, minimaxApiKey, uploadPos
             YouTube Studio
           </h1>
           {step > 0 && (
-            <button onClick={handleReset} className="text-xs text-zinc-500 hover:text-white transition-colors flex items-center gap-1">
+            <button onClick={() => { if (window.confirm('Discard current project?')) handleReset(); }} className="text-xs text-zinc-500 hover:text-white transition-colors flex items-center gap-1">
               <Plus size={12} /> New Project
             </button>
           )}
@@ -1069,7 +1072,7 @@ export default function ThumbnailStudio({ geminiApiKey, minimaxApiKey, uploadPos
                     To publish directly to YouTube, configure your Upload-Post API key and connect a profile in Settings.
                   </p>
                   <button
-                    onClick={() => { }}
+                    onClick={() => alert('Configure Upload-Post in Settings tab')}
                     className="text-xs text-primary hover:underline flex items-center gap-1"
                   >
                     <Settings size={12} /> Go to Settings

@@ -163,7 +163,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
             setGenerating(false);
             clearInterval(interval);
           }
-        } catch (_) {
+        } catch (e) {
           console.error('Poll error:', e);
         }
       }, 2000);
@@ -180,7 +180,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
         const data = await res.json();
         setVoices(data.voices || []);
       }
-    } catch (_) {
+    } catch (e) {
       console.error('Voices fetch error:', e);
     }
   };
@@ -235,7 +235,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
       }
 
       setStep(1);
-    } catch (_) {
+    } catch (e) {
       setAnalyzeError(e.message);
     } finally {
       setAnalyzing(false);
@@ -299,7 +299,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
 
       const data = await res.json();
       setJobId(data.job_id);
-    } catch (_) {
+    } catch (e) {
       setGenStatus('failed');
       setGenLogs((prev) => [...prev, `Error: ${e.message}`]);
       setGenerating(false);
@@ -345,7 +345,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
 
       const data = await res.json();
       setJobId(data.job_id);
-    } catch (_) {
+    } catch (e) {
       setGenStatus('failed');
       setGenLogs((prev) => [...prev, `Retry error: ${e.message}`]);
       setGenerating(false);
@@ -457,7 +457,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
                   >
                     <div className="flex items-center justify-between mb-1">
                       <span className={`text-sm font-semibold ${videoMode === 'premium' ? 'text-violet-300' : 'text-zinc-300'}`}>Premium</span>
-                      <span className="text-xs font-mono text-violet-400 bg-violet-500/10 px-2 py-0.5 rounded-full">~$2.00</span>
+                      <span className="text-xs font-mono text-violet-400 bg-violet-500/10 px-2 py-0.5 rounded-full">~$2.50</span>
                     </div>
                     <p className="text-[11px] text-zinc-500 leading-relaxed">Kling Avatar v2 Standard. Full integrated movement. Best quality.</p>
                   </button>
@@ -1089,7 +1089,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
                           setActorGallery(galData.images || []);
                         }
                       }
-                    } catch (_) { console.error(e); }
+                    } catch (e) { console.error(e); }
                     finally { setGeneratingActors(false); }
                   }}
                   disabled={generatingActors || !falKey || !actorDescription}
@@ -1183,7 +1183,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
                 ) : !selectedActor ? (
                   <><User size={14} /> Select an actor first</>
                 ) : (
-                  <><Film size={14} /> Generate Video (~${videoMode === 'lowcost' ? '0.65' : '2.00'})</>
+                  <><Film size={14} /> Generate Video (~${videoMode === 'lowcost' ? '0.65' : '2.50'})</>
                 )}
               </button>
             </div>
@@ -1478,7 +1478,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
                                 throw new Error(err.detail || 'Failed');
                               }
                               setPublishResult({ ok: true, msg: isScheduling ? 'Scheduled!' : 'Published!' });
-                            } catch (_) {
+                            } catch (e) {
                               setPublishResult({ ok: false, msg: e.message });
                             } finally {
                               setPublishing(false);

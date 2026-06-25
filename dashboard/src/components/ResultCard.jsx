@@ -137,9 +137,9 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 }
             }
 
-        } catch (_) {
+        } catch (e) {
             setEditError(e.message);
-            setTimeout(() => setEditError(null), 5000);
+            setTimeout(() => setEditError(null), 8000);
         } finally {
             setIsEditing(false);
         }
@@ -192,9 +192,9 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 if (videoRef.current) videoRef.current.load();
                 setShowSubtitleModal(false);
             }
-        } catch (_) {
+        } catch (e) {
             setEditError(e.message);
-            setTimeout(() => setEditError(null), 5000);
+            setTimeout(() => setEditError(null), 8000);
         } finally {
             setIsSubtitling(false);
         }
@@ -246,21 +246,19 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 if (videoRef.current) videoRef.current.load();
                 setShowHookModal(false);
             }
-        } catch (_) {
+        } catch (e) {
             setEditError(e.message);
-            setTimeout(() => setEditError(null), 5000);
+            setTimeout(() => setEditError(null), 8000);
         } finally {
             setIsHooking(false);
         }
     };
 
     const handleTranslate = async (options) => {
-        console.log('[Translate] Starting translation with options:', options);
         setIsTranslating(true);
         setEditError(null);
         try {
             const apiKey = elevenLabsKey;
-            console.log('[Translate] API Key available:', !!apiKey);
 
             if (!apiKey) {
                 throw new Error("ElevenLabs API Key is missing. Please set it in Settings.");
@@ -272,8 +270,6 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 target_language: options.targetLanguage,
                 input_filename: currentVideoUrl.split('/').pop()
             };
-            console.log('[Translate] Request body:', requestBody);
-            console.log('[Translate] Sending request to /api/translate');
 
             const res = await fetch(getApiUrl('/api/translate'), {
                 method: 'POST',
@@ -284,22 +280,19 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 body: JSON.stringify(requestBody)
             });
 
-            console.log('[Translate] Response status:', res.status);
 
             if (!res.ok) {
                 const errText = await res.text();
-                console.error('[Translate] Error response:', errText);
                 try {
                     const jsonErr = JSON.parse(errText);
                     throw new Error(jsonErr.detail || errText);
-                } catch (_) {
-                    if (e.message !== errText) throw e;
+                } catch (parseErr) {
+                    if (parseErr.message !== errText) throw parseErr;
                     throw new Error(errText);
                 }
             }
 
             const data = await res.json();
-            console.log('[Translate] Success response:', data);
             if (data.new_video_url) {
                 setCurrentVideoUrl(getApiUrl(data.new_video_url));
                 if (videoRef.current) {
@@ -308,10 +301,9 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 setShowTranslateModal(false);
             }
 
-        } catch (_) {
-            console.error('[Translate] Exception:', e);
+        } catch (e) {
             setEditError(e.message);
-            setTimeout(() => setEditError(null), 5000);
+            setTimeout(() => setEditError(null), 8000);
         } finally {
             setIsTranslating(false);
         }
@@ -377,7 +369,7 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 setPostResult(null);
             }, 3000);
 
-        } catch (_) {
+        } catch (e) {
             setPostResult({ success: false, msg: `Failed: ${e.message}` });
         } finally {
             setPosting(false);
@@ -399,12 +391,6 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                         onPlay && onPlay(clip.start + currentTime);
                     }}
                     onPause={() => onPause && onPause()}
-                    onEnded={() => {
-                        if (videoRef.current) {
-                            videoRef.current.currentTime = 0;
-                            videoRef.current.play();
-                        }
-                    }}
                 />
                 <div className="absolute top-3 left-3 flex gap-2">
                     <span className="bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded-md border border-white/10 uppercase tracking-wide">
