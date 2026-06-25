@@ -674,6 +674,24 @@ async def multilingual_translate(
             source_language=source_language,
         )
         rel = os.path.relpath(result, OUTPUT_DIR)
+        # Save to local gallery
+        try:
+            from engines.gallery import GalleryStore
+            gallery = GalleryStore()
+            if os.path.exists(result):
+                gallery.add(
+                    title=f"Translated: {os.path.basename(video_path)} → {target_language}",
+                    caption=f"Multilingual translation to {target_language}",
+                    source="multilingual",
+                    template_id="multilingual_translate",
+                    file_path=result,
+                    file_type="video",
+                    file_size=os.path.getsize(result),
+                    metadata={"source_video": video_path, "target_language": target_language, "source_language": source_language},
+                    tags=[target_language, "translation"],
+                )
+        except Exception as gal_err:
+            log.warning(f"Gallery save failed for multilingual: {gal_err}")
         return {"output_path": result, "url": f"/videos/{rel}", "target_language": target_language}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Translation failed: {e}")
@@ -950,6 +968,23 @@ async def avatar_studio_download(file_id: str):
     for root in ["output/avatar_studio", "output"]:
         local = os.path.join(root, safe)
         if os.path.exists(local) and os.path.isfile(local):
+            # Save to local gallery on download
+            try:
+                from engines.gallery import GalleryStore
+                gallery = GalleryStore()
+                gallery.add(
+                    title=f"Avatar: {safe}",
+                    caption="Avatar Studio generated video",
+                    source="avatar-studio",
+                    template_id="avatar_studio",
+                    file_path=local,
+                    file_type="video",
+                    file_size=os.path.getsize(local),
+                    metadata={"file_id": file_id},
+                    tags=["avatar"],
+                )
+            except Exception:
+                pass
             from fastapi.responses import FileResponse
             return FileResponse(local, media_type="video/mp4", filename=safe)
 
@@ -3106,6 +3141,26 @@ async def saasshorts_generate(
                         log_msg("📤 Uploaded to public gallery.")
                 except Exception as gallery_err:
                     log_msg(f"⚠️ Gallery upload skipped: {gallery_err}")
+
+                # Also save to local GalleryStore
+                try:
+                    from engines.gallery import GalleryStore
+                    gallery = GalleryStore()
+                    video_path = result.get("video_path", "")
+                    if video_path and os.path.exists(video_path):
+                        gallery.add(
+                            title=req.script.get("title", "SaaS Short"),
+                            caption=req.script.get("caption", "")[:500],
+                            source="ai-shorts",
+                            template_id="saas_shorts",
+                            file_path=video_path,
+                            file_type="video",
+                            file_size=os.path.getsize(video_path),
+                            metadata={"job_id": job_id, "style": req.script.get("style"), "language": req.script.get("language")},
+                            tags=req.script.get("hashtags", []),
+                        )
+                except Exception as gal_err:
+                    log_msg(f"⚠️ Local gallery save skipped: {gal_err}")
 
         except Exception as e:
             print(f"[SaaSShorts] ❌ Job {job_id} failed: {e}")
