@@ -21,6 +21,7 @@ import AnalyticsPanel from './components/AnalyticsPanel';
 import ContentFactoryPanel from './components/ContentFactoryPanel';
 import GalleryPanel from './components/GalleryPanel';
 import VideoEditorPanel from './components/VideoEditorPanel';
+import EngineStatusPanel from './components/EngineStatusPanel';
 import SocialConnectRow from './components/SocialConnectRow';
 import EnginePicker from './components/EnginePicker';
 import LangPicker from './components/LangPicker';
@@ -926,6 +927,9 @@ function App() {
 
           {/* View: Gallery */}
           {activeTab === 'gallery' && <GalleryPanel />}
+
+          {/* View: Engine Status */}
+          {activeTab === 'engines' && <EngineStatusPanel />}
 
           {/* View: Video Editor */}
           {activeTab === 'video-editor' && <VideoEditorPanel />}

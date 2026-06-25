@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Sparkles, Bot, LayoutGrid, Image, Layers, Mic, UserCircle, Languages, Wand2, Activity, Settings, Globe } from 'lucide-react';
+import { LayoutDashboard, Sparkles, Bot, LayoutGrid, Image, Layers, Mic, UserCircle, Languages, Wand2, Activity, Settings, Globe, Server } from 'lucide-react';
 
 export default function Sidebar({ activeTab, setActiveTab }) {
   return (
@@ -102,6 +102,15 @@ export default function Sidebar({ activeTab, setActiveTab }) {
         >
           <Activity size={20} />
           <span className="font-medium hidden lg:block">Analytics</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('engines')}
+          className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-colors ${activeTab === 'engines' ? 'bg-emerald-500/10 text-emerald-400' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}
+        >
+          <Server size={20} />
+          <span className="font-medium hidden lg:block">Engines</span>
+          <span className="hidden lg:block ml-auto text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">FREE</span>
         </button>
 
         <button

@@ -3378,6 +3378,32 @@ async def gallery_publish(item_id: str, body: Dict[str, Any] = {}):
     return asdict(item)
 
 
+@app.get("/api/gallery/{item_id}/file")
+async def gallery_serve_file(item_id: str):
+    """Serve gallery item file inline (for video/image/audio preview)."""
+    from engines.gallery import GalleryStore
+    from fastapi.responses import FileResponse
+    store = GalleryStore()
+    item = store.get(item_id)
+    if not item:
+        raise HTTPException(404, "Gallery item not found")
+    file_path = item.file_path
+    if not os.path.exists(file_path):
+        raise HTTPException(404, f"File not found on disk: {file_path}")
+    # Determine media type
+    ext = os.path.splitext(file_path)[1].lower()
+    media_type = {
+        '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+        '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+        '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.webp': 'image/webp', '.gif': 'image/gif',
+    }.get(ext, 'application/octet-stream')
+    return FileResponse(file_path, media_type=media_type, headers={
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "public, max-age=3600",
+    })
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # VIDEO EDITOR ENDPOINTS — mcp-video powered editing operations
 # ═══════════════════════════════════════════════════════════════════════

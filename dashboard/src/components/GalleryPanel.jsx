@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, FileVideo, Image, Volume2, FileText, Trash2, Loader2 } from 'lucide-react';
+import { RefreshCw, FileVideo, Image, Volume2, FileText, Trash2, Loader2, Play, X, Download, ExternalLink } from 'lucide-react';
 import { getApiUrl } from '../config';
 import { toast } from './CFUI';
 
@@ -10,6 +10,7 @@ export default function GalleryPanel() {
   const [filter, setFilter] = useState({ source: '', template_id: '', status: '', tag: '', search: '' });
   const [editingItem, setEditingItem] = useState(null);
   const [caption, setCaption] = useState('');
+  const [previewItem, setPreviewItem] = useState(null); // For inline video preview modal
 
   const fetchGallery = async () => {
     setLoading(true);
@@ -136,21 +137,46 @@ export default function GalleryPanel() {
         <div className="flex-1 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {items.map(item => (
             <div key={item.id} className="bg-white/5 rounded-xl p-4 border border-white/5 hover:border-white/10 transition flex flex-col">
-              {/* Thumbnail */}
+              {/* Thumbnail / Inline player for videos */}
               {item.file_type === 'video' ? (
-                <div className="w-full aspect-[9/16] bg-zinc-800 rounded-lg mb-3 flex items-center justify-center relative overflow-hidden">
-                  <FileVideo size={32} className="text-violet-400/50" />
+                <div className="w-full aspect-[9/16] bg-zinc-800 rounded-lg mb-3 flex items-center justify-center relative overflow-hidden group">
+                  <video
+                    src={getApiUrl(item.file_url || `/api/gallery/${item.id}/file`)}
+                    className="w-full h-full object-cover"
+                    muted
+                    playsInline
+                    onMouseEnter={(e) => e.currentTarget.play().catch(() => {})}
+                    onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0; }}
+                    onClick={() => setPreviewItem(item)}
+                  />
+                  <button
+                    onClick={() => setPreviewItem(item)}
+                    className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition cursor-pointer"
+                  >
+                    <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                      <Play size={20} className="text-white ml-1" />
+                    </div>
+                  </button>
                   <div className="absolute bottom-1 right-1 bg-black/70 text-xs px-1.5 py-0.5 rounded text-zinc-300">
                     {item.file_type}
                   </div>
                 </div>
               ) : item.file_type === 'image' ? (
-                <div className="w-full aspect-video bg-zinc-800 rounded-lg mb-3 flex items-center justify-center">
-                  <Image size={32} className="text-emerald-400/50" />
+                <div className="w-full aspect-video bg-zinc-800 rounded-lg mb-3 flex items-center justify-center overflow-hidden">
+                  <img
+                    src={getApiUrl(item.file_url || `/api/gallery/${item.id}/file`)}
+                    alt={item.title}
+                    className="w-full h-full object-cover cursor-pointer"
+                    onClick={() => setPreviewItem(item)}
+                  />
                 </div>
               ) : item.file_type === 'audio' ? (
-                <div className="w-full h-16 bg-zinc-800 rounded-lg mb-3 flex items-center justify-center">
-                  <Volume2 size={24} className="text-amber-400/50" />
+                <div className="w-full bg-zinc-800 rounded-lg mb-3 p-2">
+                  <audio
+                    src={getApiUrl(item.file_url || `/api/gallery/${item.id}/file`)}
+                    controls
+                    className="w-full h-8"
+                  />
                 </div>
               ) : (
                 <div className="w-full h-16 bg-zinc-800 rounded-lg mb-3 flex items-center justify-center">
@@ -212,6 +238,68 @@ export default function GalleryPanel() {
             <div className="flex gap-2 justify-end">
               <button onClick={() => setEditingItem(null)} className="px-4 py-2 text-zinc-400 hover:text-white text-sm">Cancel</button>
               <button onClick={saveCaption} className="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary/80">Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Inline Preview Modal */}
+      {previewItem && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={() => setPreviewItem(null)}>
+          <div className="relative max-w-2xl w-full" onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => setPreviewItem(null)}
+              className="absolute -top-2 -right-2 z-10 w-10 h-10 rounded-full bg-zinc-900 hover:bg-zinc-800 flex items-center justify-center text-white border border-white/20"
+              title="Close (Esc)"
+            >
+              <X size={20} />
+            </button>
+            <div className="bg-zinc-900 rounded-2xl overflow-hidden border border-white/10">
+              <div className="bg-black flex items-center justify-center max-h-[70vh]">
+                {previewItem.file_type === 'video' && (
+                  <video
+                    src={getApiUrl(previewItem.file_url || `/api/gallery/${previewItem.id}/file`)}
+                    controls autoPlay
+                    className="max-h-[70vh] w-auto"
+                  />
+                )}
+                {previewItem.file_type === 'image' && (
+                  <img
+                    src={getApiUrl(previewItem.file_url || `/api/gallery/${previewItem.id}/file`)}
+                    alt={previewItem.title}
+                    className="max-h-[70vh] w-auto object-contain"
+                  />
+                )}
+                {previewItem.file_type === 'audio' && (
+                  <audio
+                    src={getApiUrl(previewItem.file_url || `/api/gallery/${previewItem.id}/file`)}
+                    controls autoPlay
+                    className="w-full p-4"
+                  />
+                )}
+              </div>
+              <div className="p-4 flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm font-semibold text-white truncate">{previewItem.title}</h3>
+                  <p className="text-xs text-zinc-400 mt-1 line-clamp-2">{previewItem.caption}</p>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <a
+                    href={getApiUrl(previewItem.file_url || `/api/gallery/${previewItem.id}/file`)}
+                    download
+                    className="px-3 py-1.5 bg-violet-500/20 hover:bg-violet-500/30 text-violet-400 rounded-lg text-xs flex items-center gap-1.5"
+                  >
+                    <Download size={12} /> Download
+                  </a>
+                  <a
+                    href={getApiUrl(previewItem.file_url || `/api/gallery/${previewItem.id}/file`)}
+                    target="_blank" rel="noopener noreferrer"
+                    className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-zinc-300 rounded-lg text-xs flex items-center gap-1.5"
+                  >
+                    <ExternalLink size={12} /> Open
+                  </a>
+                </div>
+              </div>
             </div>
           </div>
         </div>
