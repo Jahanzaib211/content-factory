@@ -397,6 +397,9 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
 
   const handleRetry = async () => {
     if (!jobId) return;
+    // Auto-downgrade: ensure free mode if no fal.ai key (also fixes retry stale mode)
+    const safeMode = (videoMode === 'free' || !falKey) ? 'free' : videoMode;
+
     setGenerating(true);
     setGenLogs(['Retrying from cached assets...']);
     setGenStatus('processing');
@@ -419,10 +422,10 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
         },
         body: JSON.stringify({
           script: scriptToSend,
-          voice_id: selectedVoice,
+          voice_id: safeMode === 'free' ? selectedEdgeVoice : selectedVoice,
           actor_description: actorDescription || undefined,
           retry_job_id: jobId,
-          video_mode: videoMode,
+          video_mode: safeMode,
         }),
       });
 
