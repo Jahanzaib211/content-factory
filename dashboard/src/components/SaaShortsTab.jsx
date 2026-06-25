@@ -294,6 +294,47 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
     }
   };
 
+  // Quick Generate: skip AI analysis, build script directly from description
+  // Used in free mode when no Gemini/MiniMax key is available
+  const handleQuickGenerate = () => {
+    const desc = description.trim();
+    if (!desc) return;
+
+    // Build a simple UGC-style script from the description
+    const titleSlug = desc.split(/[.!?]/)[0].slice(0, 50).trim();
+    const narration = `${desc}. Don't miss out — try it today and see the difference yourself.`;
+
+    const script = {
+      title: titleSlug || 'Quick Video',
+      hook: titleSlug || desc.slice(0, 30),
+      full_narration: narration,
+      segments: [
+        { narration: desc + '.', visual: 'actor', start: 0, end: 4 },
+        { narration: "Don't miss out — try it today.", visual: 'broll', broll_prompt: desc.slice(0, 60), start: 4, end: 7 },
+      ],
+      cta: 'Try it today!',
+      caption: '#video #ai',
+      actor_description: `${actorGender === 'female' ? 'A young woman' : 'A young man'} in their late 20s, friendly smile, casual outfit, clean background, natural lighting`,
+    };
+
+    // Pre-fill analysis with minimal data
+    setAnalysis({
+      product_name: titleSlug,
+      industry: 'Quick Generate',
+      one_liner: desc.slice(0, 100),
+      pain_points: [{ pain: desc.slice(0, 80), intensity: 'medium', source: 'description' }],
+      emotional_hooks: ['Curiosity', 'Urgency'],
+    });
+    setWebResearch(null);
+    setScripts([script]);
+    setSelectedScript(0);
+    setActorDescription(script.actor_description);
+    setEditedNarration(script.full_narration);
+    setFromCache(false);
+    setAnalyzeError('');
+    setStep(1);
+  };
+
   const handleSelectScript = (idx) => {
     setSelectedScript(idx);
     if (scripts[idx]) {
@@ -510,7 +551,10 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className={`text-sm font-semibold ${videoMode === 'free' ? 'text-emerald-300' : 'text-zinc-300'}`}>Free</span>
+                      <span className={`text-sm font-semibold flex items-center gap-1.5 ${videoMode === 'free' ? 'text-emerald-300' : 'text-zinc-300'}`}>
+                        Free
+                        <span className="text-[9px] px-1 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">FREE</span>
+                      </span>
                       <span className="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">$0.00</span>
                     </div>
                     <p className="text-[11px] text-zinc-500 leading-relaxed">edge-tts + LocalDiffusion + FFmpeg Ken Burns. No API keys needed.</p>
@@ -524,7 +568,10 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className={`text-sm font-semibold ${videoMode === 'lowcost' ? 'text-green-300' : 'text-zinc-300'}`}>Low Cost</span>
+                      <span className={`text-sm font-semibold flex items-center gap-1.5 ${videoMode === 'lowcost' ? 'text-green-300' : 'text-zinc-300'}`}>
+                        Low Cost
+                        <span className="text-[9px] px-1 py-0.5 rounded bg-violet-500/20 text-violet-400 font-bold">PAID</span>
+                      </span>
                       <span className="text-xs font-mono text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full">~$0.80</span>
                     </div>
                     <p className="text-[11px] text-zinc-500 leading-relaxed">Hailuo 2.3 img2video + VEED Lipsync. Requires fal.ai key.</p>
@@ -538,7 +585,10 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className={`text-sm font-semibold ${videoMode === 'premium' ? 'text-violet-300' : 'text-zinc-300'}`}>Premium</span>
+                      <span className={`text-sm font-semibold flex items-center gap-1.5 ${videoMode === 'premium' ? 'text-violet-300' : 'text-zinc-300'}`}>
+                        Premium
+                        <span className="text-[9px] px-1 py-0.5 rounded bg-violet-500/20 text-violet-400 font-bold">PAID</span>
+                      </span>
                       <span className="text-xs font-mono text-violet-400 bg-violet-500/10 px-2 py-0.5 rounded-full">~$2.50</span>
                     </div>
                     <p className="text-[11px] text-zinc-500 leading-relaxed">Kling Avatar v2 Standard. Full integrated movement. Best quality.</p>
@@ -682,6 +732,19 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
                   </>
                 )}
               </button>
+
+              {/* Quick Generate — skip AI analysis, use description directly */}
+              {videoMode === 'free' && description.trim() && (
+                <button
+                  onClick={handleQuickGenerate}
+                  disabled={analyzing}
+                  className="w-full py-2.5 text-xs font-semibold rounded-lg border border-emerald-500/30 bg-emerald-500/5 text-emerald-400 hover:bg-emerald-500/10 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  title="Skip AI script analysis — use your description directly as the script (no AI key needed)"
+                >
+                  <Zap size={14} />
+                  Quick Generate (skip AI analysis) · FREE
+                </button>
+              )}
             </div>
 
             {/* Info cards */}
@@ -1295,7 +1358,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
               </div>
 
               {/* Engine Status */}
-              <div className="p-3 bg-white/5 rounded-lg border border-white/10">
+              <div className={`p-3 rounded-lg border ${videoMode === 'free' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-white/5 border-white/10'}`}>
                 <p className="text-xs font-medium text-zinc-300 mb-2">Engines that will be used:</p>
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
                   {[
@@ -1310,6 +1373,9 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
                       <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: free ? '#34d399' : '#a78bfa' }} />
                       <span className="text-zinc-500">{label}:</span>
                       <span className={free ? 'text-emerald-400' : 'text-violet-400'}>{engine}</span>
+                      <span className={`text-[9px] px-1 py-0.5 rounded font-medium ${free ? 'bg-emerald-500/15 text-emerald-400' : 'bg-violet-500/15 text-violet-400'}`}>
+                        {free ? 'FREE' : 'PAID'}
+                      </span>
                     </div>
                   ))}
                 </div>
