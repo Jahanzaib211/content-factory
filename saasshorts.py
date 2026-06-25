@@ -1228,16 +1228,20 @@ def _generate_voiceover_edge_tts(text: str, output_path: str, voice_id: str = "2
     import asyncio
     print(f"[SaaSShorts] 🎙️ Generating voiceover with edge-tts (free, {len(text)} chars)...")
 
-    # Map ElevenLabs voice IDs to edge-tts voice names
-    EDGE_VOICE_MAP = {
-        "21m00Tcm4TlvDq8ikWAM": "en-US-AriaNeural",      # Rachel → Aria
-        "29vD33N1CtxCmqQRPOHJ": "en-US-GuyNeural",        # Drew → Guy
-        "EXAVITQu4vr4xnSDxMaL": "en-US-JennyNeural",      # Bella → Jenny
-        "ErXwobaYiN019PkySvjV": "en-US-DavisNeural",      # Antoni → Davis
-        "TxGEqnHWrfWFTfGW9XjX": "en-US-AndrewNeural",    # Josh → Andrew
-        "yoZ06aMxZJJ28mfd3POQ": "en-US-BrandonNeural",   # Sam → Brandon
-    }
-    edge_voice = EDGE_VOICE_MAP.get(voice_id, "en-US-AriaNeural")
+    # If voice_id is already an edge-tts voice (contains "Neural"), use directly
+    if "Neural" in voice_id or voice_id.startswith("en-") or voice_id.startswith("es-") or voice_id.startswith("fr-"):
+        edge_voice = voice_id
+    else:
+        # Map ElevenLabs voice IDs to edge-tts voice names
+        EDGE_VOICE_MAP = {
+            "21m00Tcm4TlvDq8ikWAM": "en-US-AriaNeural",      # Rachel → Aria
+            "29vD33N1CtxCmqQRPOHJ": "en-US-GuyNeural",        # Drew → Guy
+            "EXAVITQu4vr4xnSDxMaL": "en-US-JennyNeural",      # Bella → Jenny
+            "ErXwobaYiN019PkySvjV": "en-US-DavisNeural",      # Antoni → Davis
+            "TxGEqnHWrfWFTfGW9XjX": "en-US-AndrewNeural",    # Josh → Andrew
+            "yoZ06aMxZJJ28mfd3POQ": "en-US-BrandonNeural",   # Sam → Brandon
+        }
+        edge_voice = EDGE_VOICE_MAP.get(voice_id, "en-US-AriaNeural")
 
     # Check if edge-tts is available
     try:
@@ -1368,15 +1372,72 @@ def generate_talking_head(
     return _generate_talking_head_free(image_path, audio_path, output_path)
 
 
+# Ken Burns animation presets for free mode
+KENBURNS_PRESETS = {
+    "zoom_in": {
+        "label": "Slow Zoom In",
+        "desc": "Gentle zoom from 1.0x to 1.15x",
+        "zoom": "1+0.15*on/{frames}",
+        "x": "iw/2-(iw/zoom/2)",
+        "y": "ih/2-(ih/zoom/2)",
+    },
+    "zoom_out": {
+        "label": "Slow Zoom Out",
+        "desc": "Starts zoomed, slowly pulls back",
+        "zoom": "1.15-0.15*on/{frames}",
+        "x": "iw/2-(iw/zoom/2)",
+        "y": "ih/2-(ih/zoom/2)",
+    },
+    "pan_right": {
+        "label": "Pan Right",
+        "desc": "Slides view from left to right",
+        "zoom": "1.08",
+        "x": "iw*0.1*on/{frames}",
+        "y": "ih/2-(ih/zoom/2)",
+    },
+    "pan_left": {
+        "label": "Pan Left",
+        "desc": "Slides view from right to left",
+        "zoom": "1.08",
+        "x": "iw*0.1*(1-on/{frames})",
+        "y": "ih/2-(ih/zoom/2)",
+    },
+    "zoom_pan_combo": {
+        "label": "Zoom + Pan",
+        "desc": "Zoom in with diagonal pan",
+        "zoom": "1+0.12*on/{frames}",
+        "x": "iw/2-(iw/zoom/2)+8*on/{frames}",
+        "y": "ih/2-(ih/zoom/2)-4*on/{frames}",
+    },
+}
+
+
+def _get_kenburns_filter(preset: str, total_frames: int, fps: int = 30) -> str:
+    """Build FFmpeg zoompan filter for a given Ken Burns preset."""
+    p = KENBURNS_PRESETS.get(preset, KENBURNS_PRESETS["zoom_in"])
+    zoom = p["zoom"].replace("{frames}", str(total_frames))
+    x = p["x"].replace("{frames}", str(total_frames))
+    y = p["y"].replace("{frames}", str(total_frames))
+    return (
+        f"scale=2160:3840,"
+        f"zoompan=z='{zoom}':x='{x}':y='{y}':"
+        f"d={total_frames}:s=1080x1920:fps={fps},"
+        f"setsar=1"
+    )
+
+
 def _generate_talking_head_free(
     image_path: str, audio_path: str, output_path: str,
+    preset: str = "zoom_in",
 ) -> str:
     """Generate talking head video using FFmpeg Ken Burns effect (free, local).
 
     Creates a dynamic video from a static image with subtle zoom/pan animation
     synced to the audio duration. Not AI-generated, but functional as a fallback.
+
+    Presets: zoom_in, zoom_out, pan_right, pan_left, zoom_pan_combo
     """
-    print(f"[SaaSShorts] 🗣️ Generating talking head (FFmpeg Ken Burns, free)...")
+    print(f"[SaaSShorts] 🗣️ Generating talking head (Ken Burns '{preset}', free)...")
 
     # Get audio duration
     audio_duration = _get_media_duration(audio_path)
@@ -1387,15 +1448,8 @@ def _generate_talking_head_free(
     fps = 30
     total_frames = dur_secs * fps
 
-    # Ken Burns: slow zoom in from 1.0x to 1.12x with slight upward pan
-    zoompan_filter = (
-        f"scale=2160:3840,"  # upscale to 4K for quality
-        f"zoompan=z='1+0.12*on/{total_frames}':"
-        f"x='iw/2-(iw/zoom/2)':"
-        f"y='ih/2-(ih/zoom/2)-5*on/{total_frames}':"
-        f"d={total_frames}:s=1080x1920:fps={fps},"
-        f"setsar=1"
-    )
+    # Use Ken Burns preset filter
+    zoompan_filter = _get_kenburns_filter(preset, total_frames, fps)
 
     cmd = [
         "ffmpeg", "-y",
@@ -1543,7 +1597,8 @@ def generate_talking_head_lowcost(
 
 
 def generate_broll(
-    prompt: str, fal_key: str, output_path: str, duration: str = "5"
+    prompt: str, fal_key: str, output_path: str, duration: str = "5",
+    preset: str = "zoom_pan_combo",
 ) -> str:
     """Generate b-roll with fallback chain.
 
@@ -1625,17 +1680,10 @@ def generate_broll(
     if not img_generated:
         _create_broll_placeholder(img_path, prompt)
 
-    # Ken Burns zoom effect (same for all image sources)
+    # Ken Burns zoom effect using preset
     fps = 30
     total_frames = dur_secs * fps
-    zoompan_filter = (
-        f"scale=2160:3840,"
-        f"zoompan=z='1+0.15*on/{total_frames}':"
-        f"x='iw/2-(iw/zoom/2)+10*on/{total_frames}':"
-        f"y='ih/2-(ih/zoom/2)':"
-        f"d={total_frames}:s=1080x1920:fps={fps},"
-        f"setsar=1"
-    )
+    zoompan_filter = _get_kenburns_filter(preset, total_frames, fps)
     cmd = [
         "ffmpeg", "-y",
         "-loop", "1", "-i", img_path,

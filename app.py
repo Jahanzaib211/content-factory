@@ -3005,6 +3005,77 @@ class SaaSGenerateRequest(BaseModel):
     video_mode: str = "lowcost"  # "lowcost" or "premium"
 
 
+@app.get("/api/saasshorts/voices")
+async def saasshorts_voices(
+    language: Optional[str] = None,
+    gender: Optional[str] = None,
+):
+    """List available edge-tts voices, optionally filtered by language/gender."""
+    try:
+        from engines.edge_tts import EdgeTTSEngine
+        engine = EdgeTTSEngine()
+        voices = await engine.list_voices(language=language, gender=gender)
+        presets = engine.get_preset_voices()
+        return {"voices": voices[:100], "presets": presets, "total": len(voices)}
+    except Exception as e:
+        log.error(f"Voice list failed: {e}")
+        raise HTTPException(500, f"Voice list failed: {e}")
+
+
+@app.get("/api/saasshorts/kenburns-presets")
+async def saasshorts_kenburns_presets():
+    """List available Ken Burns animation presets for free mode."""
+    from saasshorts import KENBURNS_PRESETS
+    return {
+        "presets": [
+            {"id": k, "label": v["label"], "desc": v["desc"]}
+            for k, v in KENBURNS_PRESETS.items()
+        ]
+    }
+
+
+class VoicePreviewRequest(BaseModel):
+    text: str = "Hey there! This is a quick voice preview from Content Factory."
+    voice: str = "en-US-GuyNeural"
+    rate: str = "+0%"
+    pitch: str = "+0Hz"
+
+
+@app.post("/api/saasshorts/voice-preview")
+async def saasshorts_voice_preview(req: VoicePreviewRequest):
+    """Preview an edge-tts voice with a short sample text. Returns audio URL."""
+    try:
+        from engines.edge_tts import EdgeTTSEngine
+        engine = EdgeTTSEngine()
+        text = req.text[:300]  # Limit preview text
+        result = await engine.synthesize(
+            text=text,
+            voice=req.voice,
+            rate=req.rate,
+            pitch=req.pitch,
+        )
+        audio_path = result.get("audio_path", "")
+        if audio_path and os.path.exists(audio_path):
+            import uuid
+            preview_name = f"preview_{uuid.uuid4().hex[:8]}.mp3"
+            preview_dir = os.path.join(OUTPUT_DIR, "previews")
+            os.makedirs(preview_dir, exist_ok=True)
+            dest = os.path.join(preview_dir, preview_name)
+            import shutil
+            shutil.copy2(audio_path, dest)
+            return {
+                "audio_url": f"/output/previews/{preview_name}",
+                "duration_ms": result.get("duration_ms", 0),
+                "voice": req.voice,
+            }
+        raise HTTPException(500, "Voice synthesis failed")
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Voice preview failed: {e}")
+        raise HTTPException(500, f"Voice preview failed: {e}")
+
+
 @app.post("/api/saasshorts/generate")
 async def saasshorts_generate(
     req: SaaSGenerateRequest,

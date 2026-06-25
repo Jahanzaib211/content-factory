@@ -66,6 +66,11 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
   // Step 2: Configure
   const [voices, setVoices] = useState([]);
   const [selectedVoice, setSelectedVoice] = useState('21m00Tcm4TlvDq8ikWAM');
+  const [edgeVoices, setEdgeVoices] = useState([]);  // edge-tts presets
+  const [selectedEdgeVoice, setSelectedEdgeVoice] = useState('en-US-GuyNeural');
+  const [edgeVoiceFilter, setEdgeVoiceFilter] = useState('');
+  const [previewingVoice, setPreviewingVoice] = useState(null);
+  const [previewAudio, setPreviewAudio] = useState(null);
   const [actorDescription, setActorDescription] = useState('');
   const [editedNarration, setEditedNarration] = useState('');
   const [actorOptions, setActorOptions] = useState([]);
@@ -113,13 +118,6 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
       .catch(() => {})
       .finally(() => setLoadingGallery(false));
   }, []);
-
-  // Fetch voices on mount
-  useEffect(() => {
-    if (elevenLabsKey) {
-      fetchVoices();
-    }
-  }, [elevenLabsKey]);
 
   // Reset selected voice when actor gender changes
   useEffect(() => {
@@ -177,17 +175,67 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
 
   const fetchVoices = async () => {
     try {
-      const res = await fetch(getApiUrl('/api/saasshorts/voices'), {
-        headers: { 'X-ElevenLabs-Key': elevenLabsKey },
+      // Fetch edge-tts voices (free, always available)
+      const edgeRes = await fetch(getApiUrl('/api/saasshorts/voices?language=en'));
+      if (edgeRes.ok) {
+        const edgeData = await edgeRes.json();
+        setEdgeVoices(edgeData.presets || []);
+      }
+    } catch (e) {
+      console.error('Edge voices fetch error:', e);
+    }
+
+    // Fetch ElevenLabs voices if key available
+    if (elevenLabsKey) {
+      try {
+        const res = await fetch(getApiUrl('/api/saasshorts/voices'), {
+          headers: { 'X-ElevenLabs-Key': elevenLabsKey },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setVoices(data.voices || []);
+        }
+      } catch (e) {
+        console.error('ElevenLabs voices fetch error:', e);
+      }
+    }
+  };
+
+  const previewEdgeVoice = async (voiceId) => {
+    if (previewingVoice === voiceId && previewAudio) {
+      previewAudio.pause();
+      setPreviewingVoice(null);
+      setPreviewAudio(null);
+      return;
+    }
+    setPreviewingVoice(voiceId);
+    try {
+      const res = await fetch(getApiUrl('/api/saasshorts/voice-preview'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: 'Hey! This is a preview of how I sound. Pretty cool, right?',
+          voice: voiceId,
+        }),
       });
       if (res.ok) {
         const data = await res.json();
-        setVoices(data.voices || []);
+        if (data.audio_url) {
+          const audio = new Audio(getApiUrl(data.audio_url));
+          audio.onended = () => { setPreviewingVoice(null); setPreviewAudio(null); };
+          audio.play();
+          setPreviewAudio(audio);
+        }
       }
-    } catch (e) {
-      console.error('Voices fetch error:', e);
+    } catch {
+      setPreviewingVoice(null);
     }
   };
+
+  // Fetch voices on mount and when mode changes
+  useEffect(() => {
+    fetchVoices();
+  }, [elevenLabsKey, videoMode]);
 
   const handleAnalyze = async () => {
     if (!url.trim() && !description.trim()) return;
@@ -282,7 +330,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
         },
         body: JSON.stringify({
           script: scriptToSend,
-          voice_id: selectedVoice,
+          voice_id: videoMode === 'free' ? selectedEdgeVoice : selectedVoice,
           actor_description: actorDescription || undefined,
           selected_actor_url: selectedActor || undefined,
           video_mode: videoMode,
@@ -872,100 +920,147 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
               {/* Voice Selection */}
               <div>
                 <label className="block text-sm font-medium text-zinc-300 mb-2 flex items-center gap-2">
-                  <Volume2 size={14} /> Voice {language === 'es' ? '(Spanish)' : '(English)'}
+                  <Volume2 size={14} /> Voice {videoMode === 'free' ? '(edge-tts, free)' : (language === 'es' ? '(Spanish)' : '(English)')}
                 </label>
-                {(() => {
-                  // Filter voices by language/accent
-                  const filtered = voices.length > 0
-                    ? voices.filter((v) => {
-                        const gender = (v.labels?.gender || '').toLowerCase();
-                        // Only show voices that match the selected gender
-                        return gender === actorGender;
-                      })
-                      .sort((a, b) => {
-                        const aAccent = (a.labels?.accent || '').toLowerCase();
-                        const bAccent = (b.labels?.accent || '').toLowerCase();
-                        if (language === 'es') {
-                          // Spanish/latin accents first, then everything else
-                          const aScore = (aAccent.includes('spanish') || aAccent.includes('latin')) ? 0 : 1;
-                          const bScore = (bAccent.includes('spanish') || bAccent.includes('latin')) ? 0 : 1;
-                          return aScore - bScore;
-                        }
-                        // English: american/british first
-                        const aScore = (aAccent.includes('american') || aAccent.includes('british')) ? 0 : 1;
-                        const bScore = (bAccent.includes('american') || bAccent.includes('british')) ? 0 : 1;
-                        return aScore - bScore;
-                      })
-                    : [];
 
-                  if (filtered.length > 0) {
-                    return (
-                      <div className="space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar">
-                        {filtered.map((v) => (
+                {videoMode === 'free' ? (
+                  // Free mode: edge-tts voice selector
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      placeholder="Search voices..."
+                      value={edgeVoiceFilter}
+                      onChange={(e) => setEdgeVoiceFilter(e.target.value)}
+                      className="input-field text-xs"
+                    />
+                    <div className="space-y-1 max-h-56 overflow-y-auto custom-scrollbar">
+                      {edgeVoices
+                        .filter(v => !edgeVoiceFilter || v.voice_id.toLowerCase().includes(edgeVoiceFilter.toLowerCase()) || v.language?.toLowerCase().includes(edgeVoiceFilter.toLowerCase()))
+                        .map((v) => (
                           <button
                             key={v.voice_id}
-                            onClick={() => setSelectedVoice(v.voice_id)}
-                            className={`w-full flex items-center gap-3 p-2.5 rounded-lg border text-left transition-all ${
-                              selectedVoice === v.voice_id
-                                ? 'border-violet-500/50 bg-violet-500/10 text-violet-300'
+                            onClick={() => setSelectedEdgeVoice(v.voice_id)}
+                            className={`w-full flex items-center gap-3 p-2 rounded-lg border text-left transition-all ${
+                              selectedEdgeVoice === v.voice_id
+                                ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'
                                 : 'border-white/10 bg-white/5 text-zinc-400 hover:bg-white/10'
                             }`}
                           >
                             <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium truncate">{v.name}</div>
-                              <div className="text-[10px] text-zinc-500">
-                                {v.labels?.accent || ''} {v.labels?.gender || ''} {v.category ? `· ${v.category}` : ''}
-                              </div>
+                              <div className="text-xs font-medium truncate">{v.voice_id}</div>
+                              <div className="text-[10px] text-zinc-500">{v.language} · {v.gender}</div>
                             </div>
-                            {v.preview_url && (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); new Audio(v.preview_url).play(); }}
-                                className="shrink-0 w-7 h-7 rounded-full bg-white/10 hover:bg-violet-500/30 flex items-center justify-center transition-colors"
-                                title="Preview voice"
-                              >
-                                <Volume2 size={12} />
-                              </button>
-                            )}
-                            {selectedVoice === v.voice_id && <Check size={14} className="text-violet-400 shrink-0" />}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); previewEdgeVoice(v.voice_id); }}
+                              className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition-colors ${
+                                previewingVoice === v.voice_id
+                                  ? 'bg-emerald-500/30 text-emerald-300 animate-pulse'
+                                  : 'bg-white/10 hover:bg-emerald-500/30 text-zinc-500 hover:text-emerald-400'
+                              }`}
+                              title="Preview voice"
+                            >
+                              <Volume2 size={11} />
+                            </button>
+                            {selectedEdgeVoice === v.voice_id && <Check size={12} className="text-emerald-400 shrink-0" />}
                           </button>
                         ))}
-                      </div>
-                    );
-                  }
+                    </div>
+                    <p className="text-[10px] text-zinc-600">
+                      Free · 400+ voices · 70+ languages · Click speaker to preview
+                    </p>
+                  </div>
+                ) : (
+                  // Paid mode: ElevenLabs voice selector
+                  <div>
+                    {(() => {
+                      const filtered = voices.length > 0
+                        ? voices.filter((v) => {
+                            const gender = (v.labels?.gender || '').toLowerCase();
+                            return gender === actorGender;
+                          })
+                          .sort((a, b) => {
+                            const aAccent = (a.labels?.accent || '').toLowerCase();
+                            const bAccent = (b.labels?.accent || '').toLowerCase();
+                            if (language === 'es') {
+                              const aScore = (aAccent.includes('spanish') || aAccent.includes('latin')) ? 0 : 1;
+                              const bScore = (bAccent.includes('spanish') || bAccent.includes('latin')) ? 0 : 1;
+                              return aScore - bScore;
+                            }
+                            const aScore = (aAccent.includes('american') || aAccent.includes('british')) ? 0 : 1;
+                            const bScore = (bAccent.includes('american') || bAccent.includes('british')) ? 0 : 1;
+                            return aScore - bScore;
+                          })
+                        : [];
 
-                  // Fallback defaults by gender + language
-                  const defaults = {
-                    'en-female': [
-                      { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel (calm)' },
-                      { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Bella (soft)' },
-                    ],
-                    'en-male': [
-                      { id: '29vD33N1CtxCmqQRPOHJ', name: 'Drew (confident)' },
-                      { id: 'TxGEqnHWrfWFTfGW9XjX', name: 'Josh (deep)' },
-                      { id: 'yoZ06aMxZJJ28mfd3POQ', name: 'Sam (raspy)' },
-                    ],
-                    'es-female': [
-                      { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Bella (suave)' },
-                      { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel (calmada)' },
-                    ],
-                    'es-male': [
-                      { id: 'ErXwobaYiN019PkySvjV', name: 'Antoni (cálido)' },
-                      { id: '29vD33N1CtxCmqQRPOHJ', name: 'Drew (confiado)' },
-                    ],
-                  };
-                  const key = `${language}-${actorGender}`;
-                  const opts = defaults[key] || defaults['en-female'];
-                  return (
-                    <select value={selectedVoice} onChange={(e) => setSelectedVoice(e.target.value)} className="input-field">
-                      {opts.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                    </select>
-                  );
-                })()}
-                <p className="text-[10px] text-zinc-600 mt-1">
-                  {language === 'es'
-                    ? `Voces ${actorGender === 'female' ? 'femeninas' : 'masculinas'} · Todas hablan español con modelo multilingual · Click altavoz para preview`
-                    : `${actorGender === 'female' ? 'Female' : 'Male'} voices · Click speaker to preview`}
-                </p>
+                      if (filtered.length > 0) {
+                        return (
+                          <div className="space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar">
+                            {filtered.map((v) => (
+                              <button
+                                key={v.voice_id}
+                                onClick={() => setSelectedVoice(v.voice_id)}
+                                className={`w-full flex items-center gap-3 p-2.5 rounded-lg border text-left transition-all ${
+                                  selectedVoice === v.voice_id
+                                    ? 'border-violet-500/50 bg-violet-500/10 text-violet-300'
+                                    : 'border-white/10 bg-white/5 text-zinc-400 hover:bg-white/10'
+                                }`}
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-sm font-medium truncate">{v.name}</div>
+                                  <div className="text-[10px] text-zinc-500">
+                                    {v.labels?.accent || ''} {v.labels?.gender || ''} {v.category ? `· ${v.category}` : ''}
+                                  </div>
+                                </div>
+                                {v.preview_url && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); new Audio(v.preview_url).play(); }}
+                                    className="shrink-0 w-7 h-7 rounded-full bg-white/10 hover:bg-violet-500/30 flex items-center justify-center transition-colors"
+                                    title="Preview voice"
+                                  >
+                                    <Volume2 size={12} />
+                                  </button>
+                                )}
+                                {selectedVoice === v.voice_id && <Check size={14} className="text-violet-400 shrink-0" />}
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      }
+
+                      const defaults = {
+                        'en-female': [
+                          { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel (calm)' },
+                          { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Bella (soft)' },
+                        ],
+                        'en-male': [
+                          { id: '29vD33N1CtxCmqQRPOHJ', name: 'Drew (confident)' },
+                          { id: 'TxGEqnHWrfWFTfGW9XjX', name: 'Josh (deep)' },
+                          { id: 'yoZ06aMxZJJ28mfd3POQ', name: 'Sam (raspy)' },
+                        ],
+                        'es-female': [
+                          { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Bella (suave)' },
+                          { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel (calmada)' },
+                        ],
+                        'es-male': [
+                          { id: 'ErXwobaYiN019PkySvjV', name: 'Antoni (cálido)' },
+                          { id: '29vD33N1CtxCmqQRPOHJ', name: 'Drew (confiado)' },
+                        ],
+                      };
+                      const key = `${language}-${actorGender}`;
+                      const opts = defaults[key] || defaults['en-female'];
+                      return (
+                        <select value={selectedVoice} onChange={(e) => setSelectedVoice(e.target.value)} className="input-field">
+                          {opts.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                        </select>
+                      );
+                    })()}
+                    <p className="text-[10px] text-zinc-600 mt-1">
+                      {language === 'es'
+                        ? `Voces ${actorGender === 'female' ? 'femeninas' : 'masculinas'} · Todas hablan español con modelo multilingual · Click altavoz para preview`
+                        : `${actorGender === 'female' ? 'Female' : 'Male'} voices · Click speaker to preview`}
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Actor Selection: Gallery + Generate New */}
@@ -1249,7 +1344,9 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
               {/* Progress steps */}
               <div className="space-y-2 mb-4">
                 {[
-                  videoMode === 'free' ? 'Generating actor image (LocalDiffusion) + voiceover (edge-tts)' : 'Generating actor image + voiceover',
+                  videoMode === 'free'
+                    ? `Generating actor image (LocalDiffusion) + voiceover (${selectedEdgeVoice.replace('Neural', '')})`
+                    : 'Generating actor image + voiceover',
                   videoMode === 'free' ? 'Creating talking head (FFmpeg Ken Burns)' : 'Creating talking head video (2-5 min)',
                   videoMode === 'free' ? 'Generating b-roll (LocalDiffusion + Ken Burns)' : 'Generating b-roll clips',
                   'Compositing final video',
