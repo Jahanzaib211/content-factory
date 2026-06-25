@@ -43,7 +43,11 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
 
   // Step 0: URL input
   const [url, setUrl] = useState(() => loadCache()?.url || '');
-  const [videoMode, setVideoMode] = useState('lowcost'); // "lowcost" or "premium"
+  const [videoMode, setVideoMode] = useState(() => {
+    // Auto-detect free mode when no API keys are set
+    if (!falKey && !elevenLabsKey) return 'free';
+    return 'lowcost';
+  }); // "free", "lowcost" or "premium"
   const [description, setDescription] = useState('');
   const [style, setStyle] = useState('ugc');
   const [language, setLanguage] = useState('en');
@@ -188,7 +192,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
   const handleAnalyze = async () => {
     if (!url.trim() && !description.trim()) return;
     if (!geminiApiKey && !minimaxApiKey) {
-      setAnalyzeError('AI provider key required. Set Gemini or MiniMax in Settings.');
+      setAnalyzeError('AI provider key required for script analysis. Set Gemini or MiniMax in Settings. (Video generation works free without keys.)');
       return;
     }
 
@@ -426,7 +430,21 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
               {/* Video Mode Selector */}
               <div>
                 <label className="block text-sm font-medium text-zinc-300 mb-3">Video Mode</label>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-3">
+                  <button
+                    onClick={() => setVideoMode('free')}
+                    className={`p-4 rounded-xl border text-left transition-all ${
+                      videoMode === 'free'
+                        ? 'border-emerald-500/50 bg-emerald-500/10 ring-1 ring-emerald-500/30'
+                        : 'border-white/10 bg-white/5 hover:bg-white/10'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className={`text-sm font-semibold ${videoMode === 'free' ? 'text-emerald-300' : 'text-zinc-300'}`}>Free</span>
+                      <span className="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">$0.00</span>
+                    </div>
+                    <p className="text-[11px] text-zinc-500 leading-relaxed">edge-tts + LocalDiffusion + FFmpeg Ken Burns. No API keys needed.</p>
+                  </button>
                   <button
                     onClick={() => setVideoMode('lowcost')}
                     className={`p-4 rounded-xl border text-left transition-all ${
@@ -439,7 +457,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
                       <span className={`text-sm font-semibold ${videoMode === 'lowcost' ? 'text-green-300' : 'text-zinc-300'}`}>Low Cost</span>
                       <span className="text-xs font-mono text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full">~$0.80</span>
                     </div>
-                    <p className="text-[11px] text-zinc-500 leading-relaxed">Hailuo 2.3 img2video + VEED Lipsync. Good movement + lip-sync. Recommended.</p>
+                    <p className="text-[11px] text-zinc-500 leading-relaxed">Hailuo 2.3 img2video + VEED Lipsync. Requires fal.ai key.</p>
                   </button>
                   <button
                     onClick={() => setVideoMode('premium')}
@@ -1140,25 +1158,51 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
               </div>
 
               {/* Cost Estimate */}
-              <div className="p-3 bg-white/5 rounded-lg border border-white/10">
+              <div className={`p-3 rounded-lg border ${videoMode === 'free' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-white/5 border-white/10'}`}>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-zinc-400">Estimated cost</span>
-                  <span className="text-green-400 font-semibold">~${videoMode === 'lowcost' ? '0.65' : '2.50'}</span>
+                  {videoMode === 'free' ? (
+                    <span className="text-emerald-400 font-semibold">$0.00 Free</span>
+                  ) : (
+                    <span className="text-green-400 font-semibold">~${videoMode === 'lowcost' ? '0.65' : '2.50'}</span>
+                  )}
                 </div>
                 <div className="text-[10px] text-zinc-600 mt-1">
-                  {videoMode === 'lowcost'
-                    ? 'Flux image ($0.05) + ElevenLabs voice ($0.10) + Hailuo 2.3 img2video ($0.19) + VEED Lipsync ($0.20) + Flux b-roll ($0.10)'
-                    : 'Flux image ($0.05) + ElevenLabs voice ($0.10) + Kling avatar ($1.69) + Kling b-roll ($0.70)'
+                  {videoMode === 'free'
+                    ? 'edge-tts voice (free) + LocalDiffusion image (free) + FFmpeg Ken Burns video (free) + faster-whisper subtitles (free)'
+                    : videoMode === 'lowcost'
+                      ? 'Flux image ($0.05) + voice TTS ($0.10) + Hailuo 2.3 img2video ($0.19) + VEED Lipsync ($0.20) + Flux b-roll ($0.10)'
+                      : 'Flux image ($0.05) + voice TTS ($0.10) + Kling avatar ($1.69) + Kling b-roll ($0.70)'
                   }
                 </div>
               </div>
 
-              {/* Missing keys warning */}
+              {/* Engine Status */}
+              <div className="p-3 bg-white/5 rounded-lg border border-white/10">
+                <p className="text-xs font-medium text-zinc-300 mb-2">Engines that will be used:</p>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  {[
+                    { label: 'Voice', engine: videoMode === 'free' ? 'edge-tts' : (elevenLabsKey ? 'ElevenLabs' : 'edge-tts'), free: videoMode === 'free' || !elevenLabsKey },
+                    { label: 'Actor Image', engine: videoMode === 'free' ? 'LocalDiffusion' : (falKey ? 'Flux 2 Pro' : 'LocalDiffusion'), free: videoMode === 'free' || !falKey },
+                    { label: 'Talking Head', engine: videoMode === 'free' ? 'FFmpeg Ken Burns' : (videoMode === 'lowcost' ? 'Hailuo + VEED' : 'Kling Avatar'), free: videoMode === 'free' },
+                    { label: 'B-Roll', engine: videoMode === 'free' ? 'LocalDiffusion + Ken Burns' : (falKey ? 'Flux 2 Pro + Ken Burns' : 'LocalDiffusion'), free: videoMode === 'free' || !falKey },
+                    { label: 'Subtitles', engine: 'faster-whisper', free: true },
+                    { label: 'Composite', engine: 'FFmpeg', free: true },
+                  ].map(({ label, engine, free }) => (
+                    <div key={label} className="flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: free ? '#34d399' : '#a78bfa' }} />
+                      <span className="text-zinc-500">{label}:</span>
+                      <span className={free ? 'text-emerald-400' : 'text-violet-400'}>{engine}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Missing keys info (not warning — free mode works!) */}
               {(!falKey || !elevenLabsKey) && (
-                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg flex items-center gap-2 text-sm text-amber-400">
-                  <AlertCircle size={14} />
-                  {!falKey && 'fal.ai API key missing. '}{!elevenLabsKey && 'ElevenLabs API key missing. '}
-                  Set them in Settings.
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg flex items-center gap-2 text-sm text-emerald-400">
+                  <CheckCircle2 size={14} />
+                  Free mode active — all engines work without API keys. Add keys in Settings for higher quality.
                 </div>
               )}
             </div>
@@ -1169,7 +1213,7 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
               </button>
               <button
                 onClick={handleGenerate}
-                disabled={!falKey || !elevenLabsKey || !selectedActor || generating}
+                disabled={!selectedActor || generating}
                 className="btn-primary px-6 py-2 text-sm flex items-center gap-2 disabled:opacity-50"
               >
                 {generating ? (
@@ -1205,9 +1249,9 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
               {/* Progress steps */}
               <div className="space-y-2 mb-4">
                 {[
-                  'Generating actor image + voiceover',
-                  'Creating talking head video (2-5 min)',
-                  'Generating b-roll clips',
+                  videoMode === 'free' ? 'Generating actor image (LocalDiffusion) + voiceover (edge-tts)' : 'Generating actor image + voiceover',
+                  videoMode === 'free' ? 'Creating talking head (FFmpeg Ken Burns)' : 'Creating talking head video (2-5 min)',
+                  videoMode === 'free' ? 'Generating b-roll (LocalDiffusion + Ken Burns)' : 'Generating b-roll clips',
                   'Compositing final video',
                 ].map((label, i) => {
                   const logStr = genLogs.join(' ').toLowerCase();
@@ -1320,17 +1364,21 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
 
                   {/* Cost breakdown */}
                   {genResult.cost_estimate && (
-                    <div className="p-3 bg-white/5 rounded-lg border border-white/10 space-y-1">
-                      <div className="text-xs font-semibold text-zinc-300 mb-2">Cost Breakdown</div>
-                      {Object.entries(genResult.cost_estimate).filter(([k]) => k !== 'total').map(([k, v]) => (
+                    <div className={`p-3 rounded-lg border space-y-1 ${genResult.cost_estimate.mode === 'free' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-white/5 border-white/10'}`}>
+                      <div className="text-xs font-semibold text-zinc-300 mb-2">
+                        Cost Breakdown {genResult.cost_estimate.mode === 'free' && <span className="text-emerald-400">(Free Mode)</span>}
+                      </div>
+                      {Object.entries(genResult.cost_estimate).filter(([k]) => k !== 'total' && k !== 'mode').map(([k, v]) => (
                         <div key={k} className="flex justify-between text-xs">
                           <span className="text-zinc-500">{k.replace(/_/g, ' ')}</span>
-                          <span className="text-zinc-400">${v}</span>
+                          <span className={v === 0 ? 'text-emerald-400' : 'text-zinc-400'}>{v === 0 ? 'free' : `$${v}`}</span>
                         </div>
                       ))}
                       <div className="flex justify-between text-sm font-semibold border-t border-white/10 pt-1 mt-1">
                         <span className="text-zinc-300">Total</span>
-                        <span className="text-green-400">${genResult.cost_estimate.total}</span>
+                        <span className={genResult.cost_estimate.total === 0 ? 'text-emerald-400' : 'text-green-400'}>
+                          {genResult.cost_estimate.total === 0 ? '$0.00 Free' : `$${genResult.cost_estimate.total}`}
+                        </span>
                       </div>
                     </div>
                   )}
