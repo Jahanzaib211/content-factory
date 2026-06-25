@@ -1400,13 +1400,13 @@ export default function SaaShortsTab({ geminiApiKey, minimaxApiKey, elevenLabsKe
               </button>
               <button
                 onClick={handleGenerate}
-                disabled={!selectedActor || generating}
+                disabled={generating}
                 className="btn-primary px-6 py-2 text-sm flex items-center gap-2 disabled:opacity-50"
               >
                 {generating ? (
                   <><Loader2 size={14} className="animate-spin" /> Generating...</>
                 ) : !selectedActor ? (
-                  <><User size={14} /> Select an actor first</>
+                  <><Zap size={14} /> Generate Video (auto-actor) {!falKey && !elevenLabsKey ? '(Free)' : `(~$${videoMode === 'lowcost' ? '0.65' : '2.50'})`}</>
                 ) : (
                   <><Film size={14} /> Generate Video {!falKey && !elevenLabsKey ? '(Free)' : `(~$${videoMode === 'lowcost' ? '0.65' : '2.50'})`}</>
                 )}
